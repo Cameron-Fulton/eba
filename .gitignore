@@ -1,0 +1,15 @@
+# Environment
+.env
+
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# Logs
+docs/logs/
+docs/solutions/
+
+# SQLite index
+.ai_index/

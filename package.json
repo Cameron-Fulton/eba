@@ -1,0 +1,28 @@
+{
+  "name": "episodic-blueprint-architecture",
+  "version": "1.0.0",
+  "description": "Autonomous AI engineering system with episodic memory, thread isolation, and multi-model validation",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest --forceExit",
+    "lint": "tsc --noEmit",
+    "start": "ts-node src/run.ts"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@google/generative-ai": "^0.24.1",
+    "@types/better-sqlite3": "^7.6.8",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^17.3.1",
+    "openai": "^6.29.0"
+  }
+}
