@@ -113,6 +113,11 @@ export class ThreadManager {
   private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Thread timed out after ${ms}ms`)), ms);
+      // Prevent timeout guard from keeping Node's event loop alive.
+      if (typeof (timer as NodeJS.Timeout).unref === 'function') {
+        (timer as NodeJS.Timeout).unref();
+      }
+
       promise.then(
         val => { clearTimeout(timer); resolve(val); },
         err => { clearTimeout(timer); reject(err); }

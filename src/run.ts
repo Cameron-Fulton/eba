@@ -19,17 +19,18 @@ import * as path from 'path';
 import * as fs   from 'fs';
 import 'dotenv/config';
 
-import { ModelRouter }           from './providers/model-router';
-import { BlueprintOrchestrator } from './phase1/orchestrator';
+import { ModelRouter } from './providers/model-router';
 import { NegativeKnowledgeStore } from './phase1/negative-knowledge';
 import { createDefaultToolShed } from './phase2/tool-shed';
 import { SOPEngine, createRefactoringSOP } from './phase2/sop';
-import { ThreePillarModel }      from './phase3/three-pillar-model';
-import { ShellTestRunner }       from './utils/shell-test-runner';
+import { ThreePillarModel } from './phase3/three-pillar-model';
+import { EBAPipeline } from './pipeline/eba-pipeline';
+import { ShellTestRunner } from './utils/shell-test-runner';
 
 const ROOT_DIR      = path.resolve(__dirname, '..');
 const DOCS_DIR      = path.join(ROOT_DIR, 'docs');
 const LOGS_DIR      = path.join(DOCS_DIR, 'logs');
+const PACKETS_DIR   = path.join(DOCS_DIR, 'memory-packets');
 const SOLUTIONS_DIR = path.join(DOCS_DIR, 'solutions');
 
 async function main() {
@@ -46,20 +47,22 @@ async function main() {
   }
 
   // --- Config from env ---
-  const testCommand  = process.env.TEST_COMMAND  ?? 'npm test';
+  const testCommand  = process.env.TEST_COMMAND ?? 'npm test';
   const primaryModel = (process.env.PRIMARY_MODEL ?? 'claude') as 'claude' | 'gemini' | 'openai';
 
   // --- Bootstrap components ---
   const router = new ModelRouter({ primary: primaryModel, enableConsortium: true });
+  const consortiumVoter = router.getConsortiumVoter();
 
   const negativeKnowledge = new NegativeKnowledgeStore(SOLUTIONS_DIR);
   negativeKnowledge.loadFromDisk();
   console.log(`📚 Loaded ${negativeKnowledge.getAll().length} negative knowledge entries`);
 
-  createDefaultToolShed();
+  const toolShed = createDefaultToolShed();
 
   const sop = new SOPEngine();
-  sop.register(createRefactoringSOP());
+  const refactoringSop = createRefactoringSOP();
+  sop.register(refactoringSop);
 
   const threePillar = new ThreePillarModel(async (request) => {
     console.log(`\n⚠️  Approval required for: ${request.action} (risk: ${request.risk_level})`);
@@ -81,31 +84,39 @@ async function main() {
     timeoutMs: 120_000,
   });
 
-  // --- Run orchestrator ---
-  const orchestrator = new BlueprintOrchestrator({
-    docsDir:                    DOCS_DIR,
-    logsDir:                    LOGS_DIR,
-    maxRetries:                 3,
-    contextSaturationThreshold: 50_000,
-    llmProvider:                router.standard,
+  // ModelRouter has `routine` (not `fast`) for cheap/fast tasks.
+  const routineProvider = router.routine ?? router.standard;
+
+  const pipeline = new EBAPipeline({
+    docsDir: DOCS_DIR,
+    logsDir: LOGS_DIR,
+    packetsDir: PACKETS_DIR,
+    solutionsDir: SOLUTIONS_DIR,
+    primaryProvider: router.standard,
+    routineProvider,
+    consortiumVoter,
+    sop,
+    sopId: refactoringSop.id,
+    toolShed,
+    threePillar,
     testRunner,
   });
 
-  const activeTask = orchestrator.readActiveTask();
-  console.log(`📋 Active task: ${activeTask?.split('\n')[2] ?? '(see ACTIVE_TASK.md)'}`);
+  console.log(`📋 Active task: ${(fs.readFileSync(taskFile, 'utf-8').split('\n')[2] ?? '(see ACTIVE_TASK.md)').trim()}`);
   console.log(`🤖 Primary model: ${primaryModel}`);
   console.log(`🧪 Test command:  ${testCommand}`);
-  console.log(`🗳️  Consortium:   Claude Opus + Gemini Pro + GPT-4o\n`);
+  console.log('🗳️  Consortium:   Claude Opus + Gemini Pro + GPT-4o');
+  console.log(`📋 SOP:           ${refactoringSop.name} (${refactoringSop.id})\n`);
 
   try {
-    const logs = await orchestrator.executeTask();
-    const last = logs[logs.length - 1];
+    const result = await pipeline.run();
 
     console.log('');
-    if (last?.status === 'success') {
-      console.log(`✅ Task completed in ${logs.length} attempt(s)`);
+    if (result.status === 'success') {
+      console.log(`✅ Task completed in ${result.attempts} attempt(s)`);
     } else {
-      console.log(`⚠️  Task ended with status: ${last?.status} after ${logs.length} attempt(s)`);
+      console.log(`⚠️  Task ended with status: ${result.status} after ${result.attempts} attempt(s)`);
+      const last = result.logs[result.logs.length - 1];
       if (last?.test_result?.output) {
         console.log('\n📋 Last test output:');
         console.log(last.test_result.output.slice(0, 1000));
@@ -113,8 +124,12 @@ async function main() {
     }
 
     console.log(`📁 Logs written to: ${LOGS_DIR}`);
+    if (result.packetPath) {
+      console.log(`📦 Memory packet:   ${result.packetPath}`);
+    }
+    console.log(`🆔 Session id:      ${result.sessionId}`);
   } catch (err) {
-    console.error('\n❌ Orchestrator error:', err);
+    console.error('\n❌ Pipeline error:', err);
     process.exit(1);
   }
 }
