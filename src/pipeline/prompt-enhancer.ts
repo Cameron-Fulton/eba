@@ -1,0 +1,88 @@
+/**
+ * Prompt Enhancer
+ * Wraps an LLMProvider to transparently inject context into every prompt:
+ *   - Negative knowledge: past failures relevant to this task
+ *   - SOP step: the current workflow position and allowed tools
+ *   - Tool schemas: the 2-3 most relevant tools for this task
+ *
+ * This keeps the orchestrator untouched while giving it full context.
+ */
+
+import { LLMProvider } from '../phase1/orchestrator';
+import { NegativeKnowledgeStore } from '../phase1/negative-knowledge';
+import { SOPEngine } from '../phase2/sop';
+import { ToolShed } from '../phase2/tool-shed';
+
+export interface PromptEnhancerConfig {
+  provider:         LLMProvider;
+  negativeKnowledge: NegativeKnowledgeStore;
+  sop:              SOPEngine;
+  toolShed:         ToolShed;
+  /** Max number of negative knowledge entries to inject (default: 5) */
+  maxNkEntries?:    number;
+  /** Max number of tools to inject (default: 3) */
+  maxTools?:        number;
+}
+
+export class PromptEnhancer implements LLMProvider {
+  private config: PromptEnhancerConfig;
+
+  constructor(config: PromptEnhancerConfig) {
+    this.config = config;
+  }
+
+  async call(prompt: string): Promise<string> {
+    const enhanced = this.enhance(prompt);
+    return this.config.provider.call(enhanced);
+  }
+
+  enhance(prompt: string): string {
+    const sections: string[] = [];
+
+    // --- 1. SOP context ---
+    const step = this.config.sop.getCurrentStep();
+    if (step) {
+      sections.push([
+        '## Current Workflow Step',
+        `Step: ${step.name} — ${step.description}`,
+        `Allowed tool categories: ${step.allowed_tool_categories.join(', ')}`,
+        step.allowed_tools ? `Allowed tools: ${step.allowed_tools.join(', ')}` : '',
+      ].filter(Boolean).join('\n'));
+    }
+
+    // --- 2. Relevant tools from the Tool Shed ---
+    const maxTools = this.config.maxTools ?? 3;
+    const selectedTools = this.config.toolShed.selectTools(prompt, maxTools);
+    if (selectedTools.length > 0) {
+      const toolLines = selectedTools.map(t =>
+        `- ${t.name} [${t.category}, risk:${t.risk_level}]: ${t.description}`
+      );
+      sections.push(['## Available Tools', ...toolLines].join('\n'));
+    }
+
+    // --- 3. Negative knowledge: known failures for this task ---
+    const maxNk = this.config.maxNkEntries ?? 5;
+    // Extract key terms from the prompt for searching
+    const keyTerms = prompt
+      .split(/\s+/)
+      .filter(w => w.length > 4)
+      .slice(0, 10)
+      .join(' ');
+    const failures = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
+
+    if (failures.length > 0) {
+      const failureLines = failures.map(f =>
+        `- Scenario: ${f.scenario}\n  Failed approach: ${f.attempt}\n  Why it failed: ${f.outcome}\n  What works: ${f.solution}`
+      );
+      sections.push([
+        '## ⚠️ Known Failures — Do NOT repeat these approaches',
+        ...failureLines,
+      ].join('\n'));
+    }
+
+    // --- 4. Append original prompt ---
+    sections.push('## Task', prompt);
+
+    return sections.join('\n\n');
+  }
+}
