@@ -1,8 +1,13 @@
 /**
  * Providers — public exports
  */
-export { ClaudeProvider, ClaudeModel } from './claude-provider';
-export { GeminiProvider, GeminiModel } from './gemini-provider';
-export { OpenAIProvider, OpenAIModel } from './openai-provider';
-export { OpenRouterProvider, OpenRouterModel } from './openrouter-provider';
-export { ModelRouter, ModelRouterConfig, TaskComplexity } from './model-router';
+export { ClaudeProvider } from './claude-provider';
+export type { ClaudeModel } from './claude-provider';
+export { GeminiProvider } from './gemini-provider';
+export type { GeminiModel } from './gemini-provider';
+export { OpenAIProvider } from './openai-provider';
+export type { OpenAIModel } from './openai-provider';
+export { OpenRouterProvider } from './openrouter-provider';
+export type { OpenRouterModel } from './openrouter-provider';
+export { ModelRouter } from './model-router';
+export type { ModelRouterConfig, TaskComplexity } from './model-router';
