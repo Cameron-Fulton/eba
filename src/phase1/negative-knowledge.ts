@@ -6,6 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { AIIndex } from './ai-index';
 
 export interface NegativeKnowledgeEntry {
@@ -16,6 +17,41 @@ export interface NegativeKnowledgeEntry {
   solution: string;
   tags: string[];
   timestamp: string;
+}
+
+/** Parse a negative-knowledge markdown file into a structured entry. */
+export function parseNKMarkdown(content: string, fallbackId: string): NegativeKnowledgeEntry | null {
+  const lines = content.split('\n');
+  const scenarioMatch = lines[0]?.match(/^# (.+)$/);
+  if (!scenarioMatch) return null;
+
+  const idMatch = content.match(/\*\*ID:\*\* (.+)/);
+  const dateMatch = content.match(/\*\*Date:\*\* (.+)/);
+  const tagsMatch = content.match(/\*\*Tags:\*\* (.+)/);
+
+  const attemptIdx = lines.findIndex(l => l === '## Attempt');
+  const outcomeIdx = lines.findIndex(l => l === '## Outcome');
+  const solutionIdx = lines.findIndex(l => l === '## Solution');
+
+  const attempt = attemptIdx >= 0 && outcomeIdx >= 0
+    ? lines.slice(attemptIdx + 1, outcomeIdx).join('\n').trim()
+    : '';
+  const outcome = outcomeIdx >= 0 && solutionIdx >= 0
+    ? lines.slice(outcomeIdx + 1, solutionIdx).join('\n').trim()
+    : '';
+  const solution = solutionIdx >= 0
+    ? lines.slice(solutionIdx + 1).join('\n').trim()
+    : '';
+
+  return {
+    id: idMatch?.[1] ?? fallbackId,
+    scenario: scenarioMatch[1],
+    attempt,
+    outcome,
+    solution,
+    tags: tagsMatch?.[1]?.split(', ').filter(Boolean) ?? [],
+    timestamp: dateMatch?.[1] ?? new Date().toISOString(),
+  };
 }
 
 export class NegativeKnowledgeStore {
@@ -35,7 +71,7 @@ export class NegativeKnowledgeStore {
   add(entry: Omit<NegativeKnowledgeEntry, 'id' | 'timestamp'>): NegativeKnowledgeEntry {
     const full: NegativeKnowledgeEntry = {
       ...entry,
-      id: `nk_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id: `nk_${Date.now()}_${randomUUID().replace(/-/g, '').substring(0, 8)}`,
       timestamp: new Date().toISOString(),
     };
     this.entries.set(full.id, full);
@@ -141,7 +177,9 @@ export class NegativeKnowledgeStore {
       }
     }
 
-    // Re-index loaded entries if index is active
+    // Re-index loaded entries if index is active.
+    // Safe even if the index already has data: AIIndex.index() uses upsert
+    // semantics (DELETE + INSERT in a transaction), so duplicates cannot occur.
     if (this.index) {
       for (const entry of this.entries.values()) {
         this.index.index(entry);
@@ -149,37 +187,14 @@ export class NegativeKnowledgeStore {
     }
   }
 
+  close(): void {
+    if (this.index) {
+      this.index.close();
+      this.index = null;
+    }
+  }
+
   private parseMarkdown(content: string, fallbackId: string): NegativeKnowledgeEntry | null {
-    const lines = content.split('\n');
-    const scenarioMatch = lines[0]?.match(/^# (.+)$/);
-    if (!scenarioMatch) return null;
-
-    const idMatch = content.match(/\*\*ID:\*\* (.+)/);
-    const dateMatch = content.match(/\*\*Date:\*\* (.+)/);
-    const tagsMatch = content.match(/\*\*Tags:\*\* (.+)/);
-
-    const attemptIdx = lines.findIndex(l => l === '## Attempt');
-    const outcomeIdx = lines.findIndex(l => l === '## Outcome');
-    const solutionIdx = lines.findIndex(l => l === '## Solution');
-
-    const attempt = attemptIdx >= 0 && outcomeIdx >= 0
-      ? lines.slice(attemptIdx + 1, outcomeIdx).join('\n').trim()
-      : '';
-    const outcome = outcomeIdx >= 0 && solutionIdx >= 0
-      ? lines.slice(outcomeIdx + 1, solutionIdx).join('\n').trim()
-      : '';
-    const solution = solutionIdx >= 0
-      ? lines.slice(solutionIdx + 1).join('\n').trim()
-      : '';
-
-    return {
-      id: idMatch?.[1] ?? fallbackId,
-      scenario: scenarioMatch[1],
-      attempt,
-      outcome,
-      solution,
-      tags: tagsMatch?.[1]?.split(', ').filter(Boolean) ?? [],
-      timestamp: dateMatch?.[1] ?? new Date().toISOString(),
-    };
+    return parseNKMarkdown(content, fallbackId);
   }
 }

@@ -53,12 +53,9 @@ async function runBenchmarkRefresh(configPath: string): Promise<void> {
   }
 }
 
-export function startBenchmarkScheduler(router: ModelRouter): void {
-  // Keep an explicit reference and make intent clear for future router-level hooks.
-  void router;
-
+export function startBenchmarkScheduler(_router: ModelRouter): NodeJS.Timeout {
   const config = readSchedulerConfig(MODEL_CONFIG_PATH);
-  const intervalHours = config.interval_hours || DEFAULT_INTERVAL_HOURS;
+  const intervalHours = config.interval_hours;
   const intervalMs = intervalHours * 60 * 60 * 1000;
 
   console.log(`[BenchmarkScheduler] Starting with interval=${intervalHours}h`);
@@ -69,7 +66,9 @@ export function startBenchmarkScheduler(router: ModelRouter): void {
     console.log(`[BenchmarkScheduler] Config is fresh (updated_at=${config.updated_at}); skipping immediate refresh.`);
   }
 
-  setInterval(() => {
+  const handle = setInterval(() => {
     void runBenchmarkRefresh(MODEL_CONFIG_PATH);
   }, intervalMs);
+
+  return handle;
 }

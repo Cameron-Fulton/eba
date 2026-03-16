@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AIIndex } from '../../src/phase1/ai-index';
-import { NegativeKnowledgeStore, type NegativeKnowledgeEntry } from '../../src/phase1/negative-knowledge';
+import { NegativeKnowledgeStore, parseNKMarkdown, type NegativeKnowledgeEntry } from '../../src/phase1/negative-knowledge';
 
 describe('AIIndex', () => {
   let tempDir: string;
@@ -10,39 +10,8 @@ describe('AIIndex', () => {
   let solutionsDir: string;
   let index: AIIndex;
 
-  function parseMarkdown(content: string, fallbackId: string): NegativeKnowledgeEntry | null {
-    const lines = content.split('\n');
-    const scenarioMatch = lines[0]?.match(/^# (.+)$/);
-    if (!scenarioMatch) return null;
-
-    const idMatch = content.match(/\*\*ID:\*\* (.+)/);
-    const dateMatch = content.match(/\*\*Date:\*\* (.+)/);
-    const tagsMatch = content.match(/\*\*Tags:\*\* (.+)/);
-
-    const attemptIdx = lines.findIndex(l => l === '## Attempt');
-    const outcomeIdx = lines.findIndex(l => l === '## Outcome');
-    const solutionIdx = lines.findIndex(l => l === '## Solution');
-
-    const attempt = attemptIdx >= 0 && outcomeIdx >= 0
-      ? lines.slice(attemptIdx + 1, outcomeIdx).join('\n').trim()
-      : '';
-    const outcome = outcomeIdx >= 0 && solutionIdx >= 0
-      ? lines.slice(outcomeIdx + 1, solutionIdx).join('\n').trim()
-      : '';
-    const solution = solutionIdx >= 0
-      ? lines.slice(solutionIdx + 1).join('\n').trim()
-      : '';
-
-    return {
-      id: idMatch?.[1] ?? fallbackId,
-      scenario: scenarioMatch[1],
-      attempt,
-      outcome,
-      solution,
-      tags: tagsMatch?.[1]?.split(', ').filter(Boolean) ?? [],
-      timestamp: dateMatch?.[1] ?? new Date().toISOString(),
-    };
-  }
+  // Use the shared parseNKMarkdown from negative-knowledge.ts (no duplication)
+  const parseMarkdown = parseNKMarkdown;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-index-test-'));

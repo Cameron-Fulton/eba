@@ -62,7 +62,8 @@ echo "=== HTTP Response ==="
 curl -sI https://$DOMAIN/health
 
 echo "=== Environment ==="
-ssh $SERVER 'printenv | grep -E "^(DATABASE_URL|REDIS_URL|NODE_ENV)"'
+# SECURITY: Only check presence of env vars, never print values (prevents secret leakage in logs)
+ssh $SERVER 'for var in DATABASE_URL REDIS_URL NODE_ENV; do if [ -n "${!var+x}" ]; then echo "$var=SET"; else echo "$var=UNSET"; fi; done'
 ```
 
 **Success criteria:** DNS resolves, TLS valid, HTTP 200 on health endpoint.

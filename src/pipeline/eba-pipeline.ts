@@ -71,7 +71,7 @@ export interface EBAPipelineConfig {
   visualProofOutputPath?: string;
   /**
    * Risk enforcement mode for the Three-Pillar Model.
-   * - 'dev': auto-approve everything (default, current behavior)
+   * - 'dev': auto-approve everything (explicit opt-in only; not for production)
    * - 'strict': deny all high/critical actions automatically
    * - 'configurable': use the approvalHandler provided on the ThreePillarModel instance
    */
@@ -92,7 +92,6 @@ export class EBAPipeline {
   private config: EBAPipelineConfig;
   private negativeKnowledge: NegativeKnowledgeStore;
   private sessionId: string;
-
   constructor(config: EBAPipelineConfig) {
     this.config = config;
     this.negativeKnowledge = new NegativeKnowledgeStore(config.solutionsDir);
@@ -316,7 +315,7 @@ export class EBAPipeline {
   }
 
   private applyApprovalMode(): void {
-    const mode = this.config.approvalMode ?? 'dev';
+    const mode = this.config.approvalMode ?? 'strict';
     if (mode === 'dev') {
       this.config.threePillar.setApprovalHandler(async () => true);
     } else if (mode === 'strict') {

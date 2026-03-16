@@ -90,20 +90,20 @@ export class BlueprintOrchestrator {
     attempt: number,
     previousFailureOutput?: string
   ): Promise<ExecutionLog> {
-    this.attempt = attempt;
     // Fresh agent each attempt (Ralph Wiggum pattern)
-    this.contextTokens = 0;
+    let contextTokens = 0;
 
     const prompt = this.buildPrompt(task, attempt, previousFailureOutput);
-    this.contextTokens += Math.ceil(prompt.length / 4);
+    contextTokens += Math.ceil(prompt.length / 4);
 
     let llmResponse: string;
     try {
       llmResponse = await this.config.llmProvider.call(prompt);
-      this.contextTokens += Math.ceil(llmResponse.length / 4);
+      contextTokens += Math.ceil(llmResponse.length / 4);
     } catch (err) {
       const log = this.createLog(
         task,
+        attempt,
         '',
         { passed: false, output: `LLM error: ${err}`, duration_ms: 0 },
         'failure'
@@ -113,9 +113,10 @@ export class BlueprintOrchestrator {
     }
 
     // Check context saturation
-    if (this.contextTokens > this.config.contextSaturationThreshold) {
+    if (contextTokens > this.config.contextSaturationThreshold) {
       const log = this.createLog(
         task,
+        attempt,
         llmResponse,
         { passed: false, output: 'Context saturated', duration_ms: 0 },
         'restarted'
@@ -127,7 +128,7 @@ export class BlueprintOrchestrator {
     // Run deterministic tests
     const testResult = await this.config.testRunner.run();
     const status = testResult.passed ? 'success' : 'failure';
-    const log = this.createLog(task, llmResponse, testResult, status);
+    const log = this.createLog(task, attempt, llmResponse, testResult, status);
     this.writeLog(log);
 
     return log;
@@ -149,6 +150,7 @@ export class BlueprintOrchestrator {
 
   private createLog(
     task: string,
+    attempt: number,
     llmResponse: string,
     testResult: TestResult,
     status: ExecutionLog['status']
@@ -156,7 +158,7 @@ export class BlueprintOrchestrator {
     return {
       timestamp: new Date().toISOString(),
       task,
-      attempt: this.attempt,
+      attempt,
       llm_response: llmResponse,
       test_result: testResult,
       status,

@@ -26,7 +26,6 @@ export interface PromptEnhancerConfig {
 
 export class PromptEnhancer implements LLMProvider {
   private config: PromptEnhancerConfig;
-
   constructor(config: PromptEnhancerConfig) {
     this.config = config;
   }
@@ -71,15 +70,15 @@ export class PromptEnhancer implements LLMProvider {
     const failures = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
 
     if (failures.length > 0) {
+      const sanitize = (s: string) => s.replace(/^#{1,6} /gm, '').replace(/\*\*/g, '');
       const failureLines = failures.map(f =>
-        `- Scenario: ${f.scenario}\n  Failed approach: ${f.attempt}\n  Why it failed: ${f.outcome}\n  What works: ${f.solution}`
+        `- Scenario: ${sanitize(f.scenario)}\n  Failed approach: ${sanitize(f.attempt)}\n  Why it failed: ${sanitize(f.outcome)}\n  What works: ${sanitize(f.solution)}`
       );
       sections.push([
         '## ⚠️ Known Failures — Do NOT repeat these approaches',
         ...failureLines,
       ].join('\n'));
     }
-
     // --- 4. Append original prompt ---
     sections.push('## Task', prompt);
 

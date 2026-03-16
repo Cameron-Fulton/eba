@@ -2,7 +2,17 @@ import OpenAI from 'openai';
 import { OpenRouterProvider } from '../../src/providers/openrouter-provider';
 import type { ModelRouterConfig } from '../../src/providers/model-router';
 
-jest.mock('openai');
+const { APIError } = jest.requireActual<typeof import('openai')>('openai');
+
+jest.mock('openai', () => {
+  const actual = jest.requireActual<typeof import('openai')>('openai');
+  const MockedOpenAI = jest.fn();
+  return {
+    ...actual,
+    __esModule: true,
+    default: MockedOpenAI,
+  };
+});
 
 describe('OpenRouterProvider', () => {
   const MockedOpenAI = OpenAI as unknown as jest.Mock;
@@ -67,7 +77,7 @@ describe('OpenRouterProvider', () => {
       model: MODEL,
       messages: [{ role: 'user', content: 'hello world' }],
       stream: false,
-      max_tokens: 8096,
+      max_tokens: 8192,
     });
   });
 
@@ -97,10 +107,9 @@ describe('OpenRouterProvider', () => {
   });
 
   test('call() remaps OpenRouter 502 provider errors to a retryable message', async () => {
-    mockCreate.mockRejectedValueOnce({
-      status: 502,
-      message: 'Provider returned error from upstream',
-    });
+    mockCreate.mockRejectedValueOnce(
+      new APIError(502, undefined, 'Provider returned error from upstream', undefined as any),
+    );
 
     const provider = new OpenRouterProvider(MODEL);
 

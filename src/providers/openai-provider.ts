@@ -5,22 +5,22 @@
  */
 
 import OpenAI from 'openai';
-import type { ChatCompletion } from 'openai/resources/chat/completions';
 import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
+import { withTimeout } from './utils';
 
 export type OpenAIModel =
   | 'gpt-5-mini'     // Fast, cheap — routine tasks
   | 'gpt-5'          // Balanced — standard coding and reasoning
   | 'gpt-5.4'        // Most capable — complex tasks and reasoning
-  | 'gpt-5.3-codex'; // Purpose-built coding/agentic model
+  | 'o3';            // Coding/agentic reasoning model
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
   private model: OpenAIModel;
   private maxTokens: number;
   private timeoutMs: number;
 
-  constructor(model: OpenAIModel = 'gpt-5', maxTokens = 8096, timeoutMs = 60000) {
+  constructor(model: OpenAIModel = 'gpt-5', maxTokens = 8192, timeoutMs = 60000) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY environment variable is not set');
     }
@@ -28,13 +28,6 @@ export class OpenAIProvider implements LLMProvider {
     this.model = model;
     this.maxTokens = maxTokens;
     this.timeoutMs = timeoutMs;
-  }
-
-  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('LLM call timed out after ' + ms + 'ms')), ms);
-      promise.then(val => { clearTimeout(timer); resolve(val); }, err => { clearTimeout(timer); reject(err); });
-    });
   }
 
   async call(prompt: string): Promise<string> {
@@ -45,10 +38,14 @@ export class OpenAIProvider implements LLMProvider {
       max_tokens: this.maxTokens,
     };
 
-    const completion = await this.withTimeout(
+    const completion = await withTimeout(
       this.client.chat.completions.create(request),
       this.timeoutMs,
-    ) as ChatCompletion;
+    );
+
+    if (!completion || !('choices' in completion)) {
+      throw new Error('OpenAI returned an unexpected response format');
+    }
 
     const content = completion.choices[0]?.message?.content;
     if (!content) {

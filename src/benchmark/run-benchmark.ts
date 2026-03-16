@@ -16,6 +16,8 @@ import {
 import { SOPCoverageBenchmark } from './sop-coverage';
 import { STANDARD_TASK_CORPUS } from './task-corpus';
 
+const COVERAGE_THRESHOLD = 0.5;
+
 function main() {
   console.log('\n📏 SOP Coverage Benchmark\n');
 
@@ -36,7 +38,14 @@ function main() {
   }
 
   const benchmark = new SOPCoverageBenchmark(STANDARD_TASK_CORPUS, sopEngine);
-  const result = benchmark.run();
+
+  let result;
+  try {
+    result = benchmark.run();
+  } catch (err) {
+    console.error('Benchmark failed:', err);
+    process.exit(2);
+  }
 
   console.log('Registered SOPs:');
   for (const sop of sopEngine.getRegisteredSOPs()) {
@@ -63,6 +72,13 @@ function main() {
   }
 
   console.log('');
+
+  if (result.score < COVERAGE_THRESHOLD) {
+    console.error(`Coverage score ${result.score.toFixed(3)} is below threshold ${COVERAGE_THRESHOLD}`);
+    process.exit(1);
+  }
+
+  process.exit(0);
 }
 
 main();

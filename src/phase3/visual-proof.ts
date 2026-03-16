@@ -3,6 +3,10 @@
  * Defines the interface for post-task visual verification hooks.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
+
 export interface VisualProofHook {
   name: string;
   trigger: 'post_test' | 'post_deploy' | 'manual';
@@ -95,9 +99,6 @@ export class VisualProofSystem {
       name: 'playwright',
       trigger: 'post_test',
       execute: async (context: ProofContext): Promise<ProofReport> => {
-        const fs = require('fs') as { mkdirSync: (path: string, options?: { recursive?: boolean }) => void };
-        const path = require('path') as { join: (...parts: string[]) => string };
-
         const browser = await chromium.launch({ headless: true });
 
         try {
@@ -157,7 +158,7 @@ export class VisualProofSystem {
               details: details.join(' | '),
             });
 
-            const screenshotPath = path.join(screenshotDir, `proof_${Date.now()}_${i + 1}.png`);
+            const screenshotPath = path.join(screenshotDir, `proof_${randomUUID()}_${i + 1}.png`);
             await page.screenshot({ path: screenshotPath, fullPage: true });
             screenshots.push({
               description: state.description,

@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 
 interface OpenRouterPricing {
@@ -55,6 +56,8 @@ const DEFAULT_OPENROUTER_MODELS: OpenRouterModelConfig = {
   complex: 'moonshotai/kimi-k2-thinking',
 };
 
+// TODO: Externalize KNOWN_GOOD_MODELS to a config file or environment-driven list
+// so that adding/removing trusted models doesn't require a code change.
 const KNOWN_GOOD_MODELS = new Set<string>([
   'qwen/qwen3-coder',
   'minimax/minimax-m2.5',
@@ -108,7 +111,7 @@ export class BenchmarkUpdater {
       },
     };
 
-    this.writeConfig(nextConfig);
+    await this.writeConfig(nextConfig);
 
     console.log('[BenchmarkUpdater] Updated OpenRouter model tiers:');
     this.logPick('routine', routinePick);
@@ -117,13 +120,25 @@ export class BenchmarkUpdater {
   }
 
   private async fetchModels(): Promise<OpenRouterModel[]> {
-    const response = await fetch(OPENROUTER_MODELS_ENDPOINT, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    if (typeof (timeout as NodeJS.Timeout).unref === 'function') {
+      (timeout as NodeJS.Timeout).unref();
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(OPENROUTER_MODELS_ENDPOINT, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       throw new Error(`[BenchmarkUpdater] OpenRouter model fetch failed (${response.status} ${response.statusText})`);
@@ -144,6 +159,12 @@ export class BenchmarkUpdater {
       return new Map<string, ArtificialAnalysisModel>();
     }
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    if (typeof (timeout as NodeJS.Timeout).unref === 'function') {
+      (timeout as NodeJS.Timeout).unref();
+    }
+
     try {
       const response = await fetch(ARTIFICIAL_ANALYSIS_API_ENDPOINT, {
         method: 'GET',
@@ -151,6 +172,7 @@ export class BenchmarkUpdater {
           Authorization: `Bearer ${process.env.AA_API_KEY}`,
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -171,6 +193,8 @@ export class BenchmarkUpdater {
         `[BenchmarkUpdater] Failed to fetch Artificial Analysis scores; using price-proxy fallback for complex tier. ${detail}`,
       );
       return new Map<string, ArtificialAnalysisModel>();
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -293,19 +317,28 @@ export class BenchmarkUpdater {
   }
 
   private readConfig(): ModelConfig {
+    const defaults: ModelConfig = {
+      updated_at: new Date(0).toISOString(),
+      interval_hours: DEFAULT_INTERVAL_HOURS,
+      openrouter: { ...DEFAULT_OPENROUTER_MODELS },
+    };
+
     if (!fs.existsSync(this.configPath)) {
-      return {
-        updated_at: new Date(0).toISOString(),
-        interval_hours: DEFAULT_INTERVAL_HOURS,
-        openrouter: { ...DEFAULT_OPENROUTER_MODELS },
-      };
+      return defaults;
     }
 
     const raw = fs.readFileSync(this.configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<ModelConfig>;
+
+    let parsed: Partial<ModelConfig>;
+    try {
+      parsed = JSON.parse(raw) as Partial<ModelConfig>;
+    } catch (error) {
+      console.warn('[BenchmarkUpdater] model-config.json contains invalid JSON, using defaults.', error);
+      return defaults;
+    }
 
     return {
-      updated_at: parsed.updated_at ?? new Date(0).toISOString(),
+      updated_at: parsed.updated_at ?? defaults.updated_at,
       interval_hours: parsed.interval_hours ?? DEFAULT_INTERVAL_HOURS,
       openrouter: {
         routine: parsed.openrouter?.routine ?? DEFAULT_OPENROUTER_MODELS.routine,
@@ -315,10 +348,10 @@ export class BenchmarkUpdater {
     };
   }
 
-  private writeConfig(config: ModelConfig): void {
+  private async writeConfig(config: ModelConfig): Promise<void> {
     const dir = path.dirname(this.configPath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(this.configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
   }
 
   private logPick(tier: ModelTier, pick: ScoredCandidate): void {

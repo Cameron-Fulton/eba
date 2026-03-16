@@ -7,6 +7,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
+import { withTimeout } from './utils';
 
 export type GeminiModel =
   | 'gemini-3-flash-preview'  // Fast — routine/standard tasks
@@ -26,16 +27,9 @@ export class GeminiProvider implements LLMProvider {
     this.timeoutMs = timeoutMs;
   }
 
-  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('LLM call timed out after ' + ms + 'ms')), ms);
-      promise.then(val => { clearTimeout(timer); resolve(val); }, err => { clearTimeout(timer); reject(err); });
-    });
-  }
-
   async call(prompt: string): Promise<string> {
     const generativeModel = this.client.getGenerativeModel({ model: this.model });
-    const result = await this.withTimeout(generativeModel.generateContent(prompt), this.timeoutMs);
+    const result = await withTimeout(generativeModel.generateContent(prompt), this.timeoutMs);
     const response = result.response;
     return response.text();
   }

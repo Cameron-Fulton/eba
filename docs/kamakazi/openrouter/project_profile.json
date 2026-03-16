@@ -6,7 +6,7 @@
       "name": "OpenRouter",
       "version": "v1",
       "sdk": "raw HTTP via native fetch (OpenAI-compatible)",
-      "docs_url": "https://openrouter.ai/api/v1"
+      "docs_url": "https://openrouter.ai/docs"
     }
   ],
   "language": "TypeScript",

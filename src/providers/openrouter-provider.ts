@@ -4,10 +4,11 @@
  * LLMProvider and LLMProviderConfig interfaces.
  */
 
-import OpenAI from 'openai';
+import OpenAI, { APIError } from 'openai';
 import type { ChatCompletion } from 'openai/resources/chat/completions';
 import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
+import { withTimeout } from './utils';
 
 /**
  * OpenRouter supports dynamic model IDs (including provider routing suffixes
@@ -21,7 +22,7 @@ export class OpenRouterProvider implements LLMProvider {
   private maxTokens: number;
   private timeoutMs: number;
 
-  constructor(model: OpenRouterModel, maxTokens = 8096, timeoutMs = 60000) {
+  constructor(model: OpenRouterModel, maxTokens = 8192, timeoutMs = 60000) {
     if (!process.env.OPENROUTER_API_KEY) {
       throw new Error('OPENROUTER_API_KEY environment variable is not set');
     }
@@ -40,13 +41,6 @@ export class OpenRouterProvider implements LLMProvider {
     this.timeoutMs = timeoutMs;
   }
 
-  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('LLM call timed out after ' + ms + 'ms')), ms);
-      promise.then(val => { clearTimeout(timer); resolve(val); }, err => { clearTimeout(timer); reject(err); });
-    });
-  }
-
   async call(prompt: string): Promise<string> {
     const request: Parameters<typeof this.client.chat.completions.create>[0] = {
       model: this.model,
@@ -57,13 +51,12 @@ export class OpenRouterProvider implements LLMProvider {
 
     let completion: ChatCompletion;
     try {
-      completion = await this.withTimeout(
+      completion = await withTimeout(
         this.client.chat.completions.create(request),
         this.timeoutMs,
       ) as ChatCompletion;
     } catch (error: unknown) {
-      const err = error as { status?: number; message?: string };
-      if (err?.status === 502 && /Provider returned error/i.test(err?.message ?? '')) {
+      if (error instanceof APIError && error.status === 502 && /Provider returned error/i.test(error.message ?? '')) {
         throw new Error('OpenRouter upstream failure (retryable): Provider returned error (502)');
       }
       throw error;

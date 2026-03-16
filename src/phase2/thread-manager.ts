@@ -117,8 +117,9 @@ export class ThreadManager {
   private recordEpisode(episode: Episode): void {
     this.completedEpisodes.push(episode);
 
-    while (this.completedEpisodes.length > this.config.maxEpisodeHistory) {
-      this.completedEpisodes.shift();
+    const excess = this.completedEpisodes.length - this.config.maxEpisodeHistory;
+    if (excess > 0) {
+      this.completedEpisodes.splice(0, excess);
     }
   }
 

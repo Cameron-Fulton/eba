@@ -108,6 +108,7 @@ Capture this profile:
 Save the profile as `project_profile.json` in the working directory.
 
 **Example project_profile.json** (for a TypeScript variant, see `examples/sample-project-profile.json`):
+
 ```json
 {
   "project_name": "invoice-sync",

@@ -7,6 +7,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
+import { withTimeout } from './utils';
 
 export type ClaudeModel =
   | 'claude-haiku-4-5'    // Fast, cheap — routine tasks
@@ -19,7 +20,7 @@ export class ClaudeProvider implements LLMProvider {
   private maxTokens: number;
   private timeoutMs: number;
 
-  constructor(model: ClaudeModel = 'claude-sonnet-4-6', maxTokens = 8096, timeoutMs = 60000) {
+  constructor(model: ClaudeModel = 'claude-sonnet-4-6', maxTokens = 8192, timeoutMs = 60000) {
     if (!process.env.ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY environment variable is not set');
     }
@@ -29,15 +30,8 @@ export class ClaudeProvider implements LLMProvider {
     this.timeoutMs = timeoutMs;
   }
 
-  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('LLM call timed out after ' + ms + 'ms')), ms);
-      promise.then(val => { clearTimeout(timer); resolve(val); }, err => { clearTimeout(timer); reject(err); });
-    });
-  }
-
   async call(prompt: string): Promise<string> {
-    const message = await this.withTimeout(
+    const message = await withTimeout(
       this.client.messages.create({
         model: this.model,
         max_tokens: this.maxTokens,

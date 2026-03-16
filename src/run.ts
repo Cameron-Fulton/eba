@@ -41,6 +41,13 @@ async function main() {
 
   // --- Config from env ---
   const testCommand  = process.env.TEST_COMMAND ?? 'npm test';
+
+const SHELL_METACHARACTERS = /[;&|$`\<>]/;
+if (SHELL_METACHARACTERS.test(testCommand)) {
+  console.error(`❌ TEST_COMMAND contains disallowed shell metacharacters: "${testCommand}"`);
+  console.error('   Only safe commands are allowed (e.g. "npm test", "jest --runInBand").');
+  process.exit(1);
+}
   const primaryModel = (process.env.PRIMARY_MODEL ?? 'claude') as 'claude' | 'gemini' | 'openai' | 'openrouter';
 
   // --- Validate env ---
@@ -58,7 +65,10 @@ async function main() {
 
   // --- Bootstrap components ---
   const router = new ModelRouter({ primary: primaryModel, enableConsortium: true });
-  startBenchmarkScheduler(router);
+  const schedulerHandle = startBenchmarkScheduler(router);
+  process.on('exit', () => clearInterval(schedulerHandle));
+  process.on('SIGINT', () => { clearInterval(schedulerHandle); process.exit(0); });
+  process.on('SIGTERM', () => { clearInterval(schedulerHandle); process.exit(0); });
   const consortiumVoter = router.getConsortiumVoter();
   const negativeKnowledge = new NegativeKnowledgeStore(SOLUTIONS_DIR);
   negativeKnowledge.loadFromDisk();
@@ -106,6 +116,7 @@ async function main() {
     toolShed,
     threePillar,
     testRunner,
+    approvalMode: 'dev',
   });
 
   console.log(`📋 Active task: ${(fs.readFileSync(taskFile, 'utf-8').split('\n')[2] ?? '(see ACTIVE_TASK.md)').trim()}`);

@@ -1,6 +1,6 @@
-This in-depth technical guide serves as the companion to the Episodic Blueprint Architecture (EBA) Product Requirements Document (PRD). It dives into the underlying mechanics, research, and technical implementation strategies for each layer of the EBA system.
-
 # **In-Depth Technical Guide: Episodic Blueprint Architecture (EBA)**
+
+This in-depth technical guide serves as the companion to the Episodic Blueprint Architecture (EBA) Product Requirements Document (PRD). It dives into the underlying mechanics, research, and technical implementation strategies for each layer of the EBA system.
 
 ## **Layer 1: Hybrid Memory & High-Fidelity Context Compression**
 

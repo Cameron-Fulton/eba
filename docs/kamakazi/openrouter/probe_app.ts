@@ -6,7 +6,9 @@ const REQUIRED_HEADERS = {
 };
 
 const PROMPT = "Reply with exactly: PROBE_OK";
+// Verified 2026-03-16 — review monthly; free-tier models rotate frequently on OpenRouter.
 const FREE_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+// Verified 2026-03-16 — review quarterly; paid models are more stable but can be deprecated.
 const PAID_MODEL = "mistralai/mistral-7b-instruct";
 
 type ProbeResult = {
@@ -43,21 +45,27 @@ function extractHeaders(response: Response): Record<string, string> {
   return out;
 }
 
-async function fetchJson(url: string, init: RequestInit): Promise<{ status: number; ok: boolean; headers: Record<string, string>; body: any; rawText: string; }> {
-  const response = await fetch(url, init);
-  const status = response.status;
-  const ok = response.ok;
-  const headers = extractHeaders(response);
-  const rawText = await response.text();
-
-  let body: any = null;
+async function fetchJson(url: string, init: RequestInit, timeoutMs = 10_000): Promise<{ status: number; ok: boolean; headers: Record<string, string>; body: any; rawText: string; }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    body = rawText ? JSON.parse(rawText) : null;
-  } catch {
-    body = { parse_error: "Response was not valid JSON", raw_text: rawText };
-  }
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const status = response.status;
+    const ok = response.ok;
+    const headers = extractHeaders(response);
+    const rawText = await response.text();
 
-  return { status, ok, headers, body, rawText };
+    let body: any = null;
+    try {
+      body = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      body = { parse_error: "Response was not valid JSON", raw_text: rawText };
+    }
+
+    return { status, ok, headers, body, rawText };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function getAssistantContent(body: any): string | null {

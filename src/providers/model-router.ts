@@ -54,7 +54,7 @@ export class ModelRouter {
   private static instances = new Set<ModelRouter>();
 
   private claude: { routine: ClaudeProvider; standard: ClaudeProvider; complex: ClaudeProvider };
-  private gemini: { routine: GeminiProvider; standard: GeminiProvider };
+  private gemini: { routine: GeminiProvider; standard: GeminiProvider; complex: GeminiProvider };
   private openai: { routine: OpenAIProvider; standard: OpenAIProvider; complex: OpenAIProvider };
   private openrouter: { routine: OpenRouterProvider; standard: OpenRouterProvider; complex: OpenRouterProvider };
   private config: ModelRouterConfig;
@@ -70,13 +70,14 @@ export class ModelRouter {
 
     this.gemini = {
       routine: new GeminiProvider('gemini-3-flash-preview'),
-      standard: new GeminiProvider('gemini-3-flash-preview'),
+      standard: new GeminiProvider('gemini-3.1-pro-preview'),
+      complex: new GeminiProvider('gemini-3.1-pro-preview'),
     };
 
     this.openai = {
       routine: new OpenAIProvider('gpt-5-mini'),
       standard: new OpenAIProvider('gpt-5'),
-      complex: new OpenAIProvider('gpt-5.3-codex'),
+      complex: new OpenAIProvider('o3'),
     };
 
     this.openrouter = this.buildOpenRouterProviders(ModelRouter.loadOpenRouterTierConfig());
@@ -99,8 +100,20 @@ export class ModelRouter {
   }
 
   private static loadOpenRouterTierConfig(): OpenRouterTierConfig {
+    let raw: string;
     try {
-      const raw = fs.readFileSync(MODEL_CONFIG_PATH, 'utf-8');
+      raw = fs.readFileSync(MODEL_CONFIG_PATH, 'utf-8');
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {
+        console.warn('[ModelRouter] model-config.json not found, using defaults.');
+      } else {
+        console.warn('[ModelRouter] Failed to read model-config.json, using defaults.', error);
+      }
+      return { ...DEFAULT_OPENROUTER_MODELS };
+    }
+
+    try {
       const parsed = JSON.parse(raw) as OpenRouterConfigFile;
 
       return {
@@ -109,7 +122,7 @@ export class ModelRouter {
         complex: parsed.openrouter?.complex ?? DEFAULT_OPENROUTER_MODELS.complex,
       };
     } catch (error) {
-      console.warn('[ModelRouter] Failed to read model-config.json, using defaults.', error);
+      console.warn('[ModelRouter] model-config.json contains invalid JSON, using defaults.', error);
       return { ...DEFAULT_OPENROUTER_MODELS };
     }
   }
@@ -133,7 +146,11 @@ export class ModelRouter {
   getProvider(complexity: TaskComplexity): LLMProvider {
     switch (this.config.primary) {
       case 'gemini':
-        return complexity === 'routine' ? this.gemini.routine : this.gemini.standard;
+        return complexity === 'routine'
+          ? this.gemini.routine
+          : complexity === 'standard'
+            ? this.gemini.standard
+            : this.gemini.complex;
       case 'openai':
         return complexity === 'routine'
           ? this.openai.routine
@@ -158,7 +175,7 @@ export class ModelRouter {
 
   /**
    * Returns a ConsortiumVoter with all three providers for complex validation tasks.
-   * Claude Opus + Gemini Pro + GPT-4.1 in parallel.
+   * Claude Opus + Gemini Pro + GPT-5 in parallel.
    */
   getConsortiumVoter(config?: Partial<ConsortiumConfig>): ConsortiumVoter {
     if (!this.config.enableConsortium) {
@@ -175,6 +192,16 @@ export class ModelRouter {
         this.openai.standard.toConsortiumProvider(),
       ],
     });
+  }
+
+  /** Removes this instance from the global registry. Call on shutdown to prevent memory leaks. */
+  destroy(): void {
+    ModelRouter.instances.delete(this);
+  }
+
+  /** Remove this instance from the static instance set to allow garbage collection. */
+  dispose(): void {
+    this.destroy();
   }
 
   /** Convenience: provider for routine compression/tool-selection tasks */

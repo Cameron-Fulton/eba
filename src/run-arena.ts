@@ -21,11 +21,26 @@ import { ParallelNegativeKnowledge } from './phase4/parallel-negative-knowledge'
 import { NegativeKnowledgeStore } from './phase1/negative-knowledge';
 
 const ROOT_DIR      = path.resolve(__dirname, '..');
-const SOLUTIONS_DIR = path.join(ROOT_DIR, process.env.SOLUTIONS_DIR ?? 'docs/solutions');
+const rawSolutionsDir = process.env.SOLUTIONS_DIR ?? 'docs/solutions';
+const SOLUTIONS_DIR = path.resolve(ROOT_DIR, rawSolutionsDir);
+if (!SOLUTIONS_DIR.startsWith(ROOT_DIR + path.sep) && SOLUTIONS_DIR !== ROOT_DIR) {
+  throw new Error(`SOLUTIONS_DIR must be inside the project root. Got: ${SOLUTIONS_DIR}`);
+}
 
 const OBJECTIVE_NAME = process.env.ARENA_OBJECTIVE ?? 'test_pass_rate';
-const MAX_ITERATIONS = parseInt(process.env.ARENA_MAX_ITER  ?? '10', 10);
-const THRESHOLD      = parseFloat(process.env.ARENA_THRESHOLD ?? '0.01');
+const MAX_ITERATIONS_RAW = parseInt(process.env.ARENA_MAX_ITER  ?? '10', 10);
+const THRESHOLD_RAW      = parseFloat(process.env.ARENA_THRESHOLD ?? '0.01');
+
+if (Number.isNaN(MAX_ITERATIONS_RAW)) {
+  throw new Error(`ARENA_MAX_ITER is not a valid integer: "${process.env.ARENA_MAX_ITER}"`);
+}
+if (Number.isNaN(THRESHOLD_RAW)) {
+  throw new Error(`ARENA_THRESHOLD is not a valid number: "${process.env.ARENA_THRESHOLD}"`);
+}
+
+const MAX_ITERATIONS = MAX_ITERATIONS_RAW;
+const THRESHOLD      = THRESHOLD_RAW;
+const DETERMINISTIC  = process.env.ARENA_DETERMINISTIC === '1';
 
 async function main() {
   console.log('\n🏟️  EBA Arena Loop — Phase 4\n');
@@ -48,8 +63,8 @@ async function main() {
     const totalFailed = allEntries.length;
     // Objective: fewer failures → higher score. Normalize over max expected failures (100).
     const raw  = Math.max(0, 1.0 - totalFailed / 100);
-    // Decay slightly each iteration to simulate real variance
-    const noise = (Math.random() - 0.5) * 0.02;
+    // Decay slightly each iteration to simulate real variance (disabled in deterministic mode)
+    const noise = DETERMINISTIC ? 0 : (Math.random() - 0.5) * 0.02;
     return Math.min(1.0, Math.max(0.0, raw + noise));
   };
 
@@ -101,15 +116,19 @@ async function main() {
 
   // Record this run to negative knowledge if metric is low
   if (finalState.best_metric < 0.5) {
-    await pnk.recordAttempt({
-      thread_id:          'arena-main',
-      task:               OBJECTIVE_NAME,
-      approach:           `ArenaLoop/${MAX_ITERATIONS}-iterations`,
-      avoided_approaches: await pnk.getAvoidedApproaches(OBJECTIVE_NAME),
-      result:             'failure',
-      timestamp:          new Date().toISOString(),
-    });
-    console.log('📝 Low-metric run recorded to negative knowledge store');
+    try {
+      await pnk.recordAttempt({
+        thread_id:          'arena-main',
+        task:               OBJECTIVE_NAME,
+        approach:           `ArenaLoop/${MAX_ITERATIONS}-iterations`,
+        avoided_approaches: await pnk.getAvoidedApproaches(OBJECTIVE_NAME),
+        result:             'failure',
+        timestamp:          new Date().toISOString(),
+      });
+      console.log('📝 Low-metric run recorded to negative knowledge store');
+    } catch (recordErr) {
+      console.error('⚠️ Failed to record low-metric run to negative knowledge:', recordErr);
+    }
   }
 }
 

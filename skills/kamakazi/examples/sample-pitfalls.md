@@ -43,4 +43,5 @@
 
 - **Symptom:** `TypeError: Cannot read properties of undefined (reading 'apiKey')` at init
 - **Root Cause:** Environment variable not set; Stripe constructor receives `undefined`
+- **Detection:** Runtime `TypeError` during Stripe client initialization when `STRIPE_SECRET_KEY` is missing or empty
 - **Fix:** Added explicit env var check with clear error message before initializing Stripe

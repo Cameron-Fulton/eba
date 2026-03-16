@@ -57,7 +57,8 @@ export class ArenaLoop {
     try {
       this.state.current_metric = await this.config.objective_fn(this.state);
       this.state.best_metric = this.state.current_metric;
-    } catch {
+    } catch (err) {
+      console.error(`Arena: baseline objective_fn failed:`, err);
       this.running = false;
       return this.getState();
     }
@@ -69,7 +70,8 @@ export class ArenaLoop {
       try {
         // Ask optimizer for next parameters/strategy
         optimization = await this.config.optimizer(this.state);
-      } catch {
+      } catch (err) {
+        console.error(`Arena: optimizer failed at iteration ${i}:`, err);
         this.running = false;
         return this.getState();
       }
@@ -83,7 +85,8 @@ export class ArenaLoop {
       let newMetric: number;
       try {
         newMetric = await this.config.objective_fn(this.state);
-      } catch {
+      } catch (err) {
+        console.error(`Arena: objective_fn failed at iteration ${i}:`, err);
         this.running = false;
         return this.getState();
       }

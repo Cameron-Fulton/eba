@@ -85,6 +85,17 @@ export class AIIndex {
   search(keyword: string): NegativeKnowledgeEntry[] {
     if (!this.ready || !keyword.trim()) return [];
 
+    // Sanitize keyword for FTS5 MATCH: escape double quotes, strip FTS5
+    // operators (AND, OR, NOT, NEAR, *, ^), and wrap in double quotes for
+    // safe term matching.
+    const sanitized = keyword
+      .replace(/"/g, '""')
+      .replace(/\b(AND|OR|NOT|NEAR)\b/g, '')
+      .replace(/[*^]/g, '')
+      .trim();
+    if (!sanitized) return [];
+    const safeTerm = `"${sanitized}"`;
+
     try {
       const rows = this.db.prepare(`
         SELECT e.data
@@ -92,7 +103,7 @@ export class AIIndex {
         JOIN nk_entries e ON e.id = f.id
         WHERE nk_fts MATCH ?
         ORDER BY rank
-      `).all(keyword) as { data: string }[];
+      `).all(safeTerm) as { data: string }[];
 
       return rows.map(r => JSON.parse(r.data) as NegativeKnowledgeEntry);
     } catch {
@@ -106,11 +117,10 @@ export class AIIndex {
     parseMarkdown: (content: string, fallbackId: string) => NegativeKnowledgeEntry | null
   ): number {
     if (!this.ready) return 0;
+    if (!fs.existsSync(solutionsDir)) return 0;
 
     // Clear existing index
     this.db.exec('DELETE FROM nk_entries; DELETE FROM nk_fts;');
-
-    if (!fs.existsSync(solutionsDir)) return 0;
 
     const files = fs.readdirSync(solutionsDir).filter(f => f.endsWith('.md'));
     let count = 0;

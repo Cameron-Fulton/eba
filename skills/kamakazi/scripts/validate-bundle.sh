@@ -64,14 +64,14 @@ fi
 # Validate project_profile.json is valid JSON
 if [ -f "$DIR/project_profile.json" ]; then
   if command -v python3 &>/dev/null; then
-    if python3 -c "import json; json.load(open('$DIR/project_profile.json'))" 2>/dev/null; then
+    if python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$DIR/project_profile.json" 2>/dev/null; then
       echo "  OK    project_profile.json is valid JSON"
     else
       echo "  FAIL  project_profile.json is not valid JSON"
       ERRORS=$((ERRORS + 1))
     fi
   elif command -v node &>/dev/null; then
-    if node -e "JSON.parse(require('fs').readFileSync('$DIR/project_profile.json','utf8'))" 2>/dev/null; then
+    if node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$DIR/project_profile.json" 2>/dev/null; then
       echo "  OK    project_profile.json is valid JSON"
     else
       echo "  FAIL  project_profile.json is not valid JSON"

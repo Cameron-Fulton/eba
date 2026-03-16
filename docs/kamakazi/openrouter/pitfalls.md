@@ -133,6 +133,7 @@ This file tracks real-world OpenRouter issues in a **Symptom / Cause / Detection
 
 **Cause**
 - Nemotron can generate roughly **~15x more tokens than a median model** in some evaluations; throughput headlines can hide token-cost inflation.
+
 **Detection**
 - Track `usage.total_tokens`, output length, and cost-per-task; compare against baseline models.
 

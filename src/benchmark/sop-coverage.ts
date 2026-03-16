@@ -24,7 +24,7 @@ export class SOPCoverageBenchmark {
   private readonly sopEngine: SOPEngine;
   private readonly matchThreshold: number;
 
-  constructor(taskPrompts: string[], sopEngine: SOPEngine, matchThreshold: number = 0.08) {
+  constructor(taskPrompts: string[], sopEngine: SOPEngine, matchThreshold: number = 0.5) {
     this.tasks = [...taskPrompts];
     this.sopEngine = sopEngine;
     this.matchThreshold = matchThreshold;
@@ -66,7 +66,7 @@ export class SOPCoverageBenchmark {
       return {
         task,
         matched_sop: null,
-        confidence: 0,
+        confidence: bestConfidence,
       };
     }
 

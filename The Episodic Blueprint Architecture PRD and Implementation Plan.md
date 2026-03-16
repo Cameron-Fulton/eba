@@ -49,7 +49,7 @@ We will build the Episodic Blueprint Architecture in four distinct phases to ens
 
 **Goal:** Establish the deterministic script and the external state environment.
 
-* **Repository Structure:** Set up the flat /docs folder for Markdown files (PROJECT.md, ACTIVE\_TASK.md, /logs) and the hidden /.ai\_index for the SQLite derived database 7\.  
+* **Repository Structure:** Set up the flat /docs folder for Markdown files (PROJECT.md, ACTIVE\_TASK.md, /logs) and the hidden /.ai\_index for the SQLite-derived database 7\.  
 * **Implement Memory Packets:** Build the JSON schema for memory\_packet.json to handle context serialization 16\. Build the Compression Agent to summarize chat transcripts into packets at the end of a session 36\.  
 * **Build the Basic Blueprint:** Create the core Python/Node orchestrator script that can:  
 * Read the active task.  
