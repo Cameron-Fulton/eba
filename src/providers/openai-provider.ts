@@ -11,8 +11,7 @@ import { withTimeout } from './utils';
 
 export type OpenAIModel =
   | 'gpt-5-mini'     // Fast, cheap — routine tasks
-  | 'gpt-5'          // Balanced — standard coding and reasoning
-  | 'gpt-5.4'        // Most capable — complex tasks and reasoning
+  | 'gpt-5.4'        // Balanced — standard coding and reasoning
   | 'o3';            // Coding/agentic reasoning model
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
@@ -20,7 +19,7 @@ export class OpenAIProvider implements LLMProvider {
   private maxTokens: number;
   private timeoutMs: number;
 
-  constructor(model: OpenAIModel = 'gpt-5', maxTokens = 8192, timeoutMs = 60000) {
+  constructor(model: OpenAIModel = 'gpt-5.4', maxTokens = 8192, timeoutMs = 60000) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY environment variable is not set');
     }

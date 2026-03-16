@@ -46,14 +46,14 @@ const GEMINI_MODELS: Record<TaskComplexity, GeminiModel> = {
 
 const OPENAI_MODELS: Record<TaskComplexity, OpenAIModel> = {
   routine:  'gpt-5-mini',
-  standard: 'gpt-5',
+  standard: 'gpt-5.4',
   complex:  'o3',
 };
 
 const DEFAULT_OPENROUTER_MODELS: Record<TaskComplexity, string> = {
   routine:  'qwen/qwen3-coder',
   standard: 'minimax/minimax-m2.5',
-  complex:  'moonshotai/kimi-k2-thinking',
+  complex:  'moonshotai/kimi-k2.5',
 };
 
 // ── Config file types ──────────────────────────────────────────────────────
