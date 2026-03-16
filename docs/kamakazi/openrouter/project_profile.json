@@ -1,0 +1,23 @@
+{
+  "project_name": "eba-openrouter",
+  "description": "Kamakazi pre-flight probe for OpenRouter OpenAI-compatible API integration in a TypeScript/Node.js project.",
+  "target_apis": [
+    {
+      "name": "OpenRouter",
+      "version": "v1",
+      "sdk": "raw HTTP via native fetch (OpenAI-compatible)",
+      "docs_url": "https://openrouter.ai/api/v1"
+    }
+  ],
+  "language": "TypeScript",
+  "framework": "Node.js",
+  "auth_method": "API key in Authorization: Bearer header",
+  "core_flows": [
+    "List available models with pricing",
+    "Call nvidia/nemotron-3-super-120b-a12b:free chat completion",
+    "Inspect usage/cost/generation metadata in completion and generation responses"
+  ],
+  "platform": "CLI probe script",
+  "environment": "local dev",
+  "generated_at": "2026-03-15T00:00:00Z"
+}

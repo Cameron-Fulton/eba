@@ -18,6 +18,7 @@ export interface Episode {
 export interface ThreadConfig {
   timeout_ms: number;
   max_concurrent: number;
+  maxEpisodeHistory?: number;
 }
 
 export interface WorkerThread {
@@ -34,13 +35,16 @@ export type ThreadExecutor = (task: string, tools: string[]) => Promise<{
 }>;
 
 export class ThreadManager {
-  private config: ThreadConfig;
+  private config: Required<ThreadConfig>;
   private executor: ThreadExecutor;
-  private activeThreads: Map<string, boolean> = new Map();
+  private activeCount: number = 0;
   private completedEpisodes: Episode[] = [];
 
   constructor(config: ThreadConfig, executor: ThreadExecutor) {
-    this.config = config;
+    this.config = {
+      ...config,
+      maxEpisodeHistory: config.maxEpisodeHistory ?? 500,
+    };
     this.executor = executor;
   }
 
@@ -56,7 +60,7 @@ export class ThreadManager {
   }
 
   private async runThread(id: string, task: string, tools: string[]): Promise<Episode> {
-    if (this.activeThreads.size >= this.config.max_concurrent) {
+    if (this.activeCount >= this.config.max_concurrent) {
       return {
         thread_id: id,
         task,
@@ -69,7 +73,7 @@ export class ThreadManager {
       };
     }
 
-    this.activeThreads.set(id, true);
+    this.activeCount += 1;
     const start = Date.now();
 
     try {
@@ -89,7 +93,7 @@ export class ThreadManager {
         status: result.errors.length > 0 ? 'failure' : 'success',
       };
 
-      this.completedEpisodes.push(episode);
+      this.recordEpisode(episode);
       return episode;
     } catch (err) {
       const episode: Episode = {
@@ -103,10 +107,18 @@ export class ThreadManager {
         status: err instanceof Error && err.message.includes('timed out') ? 'timeout' : 'failure',
       };
 
-      this.completedEpisodes.push(episode);
+      this.recordEpisode(episode);
       return episode;
     } finally {
-      this.activeThreads.delete(id);
+      this.activeCount = Math.max(0, this.activeCount - 1);
+    }
+  }
+
+  private recordEpisode(episode: Episode): void {
+    this.completedEpisodes.push(episode);
+
+    while (this.completedEpisodes.length > this.config.maxEpisodeHistory) {
+      this.completedEpisodes.shift();
     }
   }
 
@@ -139,6 +151,6 @@ export class ThreadManager {
   }
 
   getActiveThreadCount(): number {
-    return this.activeThreads.size;
+    return this.activeCount;
   }
 }

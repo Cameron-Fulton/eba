@@ -54,21 +54,40 @@ export class ArenaLoop {
     this.running = true;
 
     // Measure baseline
-    this.state.current_metric = await this.config.objective_fn(this.state);
-    this.state.best_metric = this.state.current_metric;
+    try {
+      this.state.current_metric = await this.config.objective_fn(this.state);
+      this.state.best_metric = this.state.current_metric;
+    } catch {
+      this.running = false;
+      return this.getState();
+    }
 
     for (let i = 1; i <= this.config.max_iterations && this.running; i++) {
       this.state.iteration = i;
 
-      // Ask optimizer for next parameters/strategy
-      const optimization = await this.config.optimizer(this.state);
+      let optimization: Awaited<ReturnType<ArenaOptimizer>>;
+      try {
+        // Ask optimizer for next parameters/strategy
+        optimization = await this.config.optimizer(this.state);
+      } catch {
+        this.running = false;
+        return this.getState();
+      }
+
       const previousMetric = this.state.current_metric;
 
       // Apply new parameters
       this.state.parameters = { ...this.state.parameters, ...optimization.parameters };
 
       // Measure new metric
-      const newMetric = await this.config.objective_fn(this.state);
+      let newMetric: number;
+      try {
+        newMetric = await this.config.objective_fn(this.state);
+      } catch {
+        this.running = false;
+        return this.getState();
+      }
+
       const improvement = newMetric - previousMetric;
 
       this.state.current_metric = newMetric;
@@ -88,7 +107,7 @@ export class ArenaLoop {
       this.state.history.push(result);
 
       // Check if improvement is below threshold (convergence)
-      if (i > 1 && Math.abs(improvement) < this.config.improvement_threshold) {
+      if (i > 1 && improvement >= 0 && improvement < this.config.improvement_threshold) {
         break;
       }
     }

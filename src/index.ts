@@ -8,6 +8,7 @@ export { BlueprintOrchestrator, OrchestratorConfig, LLMProvider, TestRunner } fr
 export { ThreadManager, Episode, ThreadConfig } from './phase2/thread-manager';
 export { ToolShed, ToolSchema, createDefaultToolShed } from './phase2/tool-shed';
 export { SOPEngine, SOPDefinition, SOPStep, createRefactoringSOP } from './phase2/sop';
+export { createOrchestratorExecutor, buildAttemptPrompt, ThreadExecutorConfig } from './phase2/thread-executor';
 
 // Phase 3: Validation & Safety
 export { ConsortiumVoter, ConsortiumConfig, VoteResult, computeSimilarity, clusterResponses } from './phase3/consortium-voter';

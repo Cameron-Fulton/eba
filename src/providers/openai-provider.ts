@@ -5,34 +5,50 @@
  */
 
 import OpenAI from 'openai';
+import type { ChatCompletion } from 'openai/resources/chat/completions';
 import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
 
 export type OpenAIModel =
-  | 'gpt-4o-mini'   // Fast, cheap — routine tasks
-  | 'gpt-4o'        // Balanced — standard coding and reasoning
-  | 'o1-preview';   // Deep reasoning — high-stakes decisions
-
+  | 'gpt-5-mini'     // Fast, cheap — routine tasks
+  | 'gpt-5'          // Balanced — standard coding and reasoning
+  | 'gpt-5.4'        // Most capable — complex tasks and reasoning
+  | 'gpt-5.3-codex'; // Purpose-built coding/agentic model
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
   private model: OpenAIModel;
   private maxTokens: number;
+  private timeoutMs: number;
 
-  constructor(model: OpenAIModel = 'gpt-4o', maxTokens = 8096) {
+  constructor(model: OpenAIModel = 'gpt-5', maxTokens = 8096, timeoutMs = 60000) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY environment variable is not set');
     }
     this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     this.model = model;
     this.maxTokens = maxTokens;
+    this.timeoutMs = timeoutMs;
+  }
+
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('LLM call timed out after ' + ms + 'ms')), ms);
+      promise.then(val => { clearTimeout(timer); resolve(val); }, err => { clearTimeout(timer); reject(err); });
+    });
   }
 
   async call(prompt: string): Promise<string> {
-    const completion = await this.client.chat.completions.create({
+    const request: Parameters<typeof this.client.chat.completions.create>[0] = {
       model: this.model,
-      max_tokens: this.maxTokens,
       messages: [{ role: 'user', content: prompt }],
-    });
+      stream: false as const,
+      max_tokens: this.maxTokens,
+    };
+
+    const completion = await this.withTimeout(
+      this.client.chat.completions.create(request),
+      this.timeoutMs,
+    ) as ChatCompletion;
 
     const content = completion.choices[0]?.message?.content;
     if (!content) {

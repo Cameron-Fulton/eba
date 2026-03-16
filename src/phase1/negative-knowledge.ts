@@ -6,6 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { AIIndex } from './ai-index';
 
 export interface NegativeKnowledgeEntry {
   id: string;
@@ -19,10 +20,16 @@ export interface NegativeKnowledgeEntry {
 
 export class NegativeKnowledgeStore {
   private entries: Map<string, NegativeKnowledgeEntry> = new Map();
+  private dirtyIds: Set<string> = new Set();
   private readonly solutionsDir: string;
+  private index: AIIndex | null = null;
 
   constructor(solutionsDir: string) {
     this.solutionsDir = solutionsDir;
+  }
+
+  initIndex(dbPath: string): void {
+    this.index = new AIIndex(dbPath);
   }
 
   add(entry: Omit<NegativeKnowledgeEntry, 'id' | 'timestamp'>): NegativeKnowledgeEntry {
@@ -32,6 +39,8 @@ export class NegativeKnowledgeStore {
       timestamp: new Date().toISOString(),
     };
     this.entries.set(full.id, full);
+    this.dirtyIds.add(full.id);
+    this.index?.index(full);
     return full;
   }
 
@@ -40,7 +49,12 @@ export class NegativeKnowledgeStore {
   }
 
   remove(id: string): boolean {
-    return this.entries.delete(id);
+    const removed = this.entries.delete(id);
+    if (removed) {
+      this.dirtyIds.delete(id);
+      this.index?.remove(id);
+    }
+    return removed;
   }
 
   update(id: string, updates: Partial<Omit<NegativeKnowledgeEntry, 'id' | 'timestamp'>>): NegativeKnowledgeEntry | undefined {
@@ -48,10 +62,17 @@ export class NegativeKnowledgeStore {
     if (!existing) return undefined;
     const updated = { ...existing, ...updates };
     this.entries.set(id, updated);
+    this.dirtyIds.add(id);
+    this.index?.index(updated);
     return updated;
   }
 
   searchByKeyword(keyword: string): NegativeKnowledgeEntry[] {
+    // Try FTS5 index first; fall back to linear scan if index not ready or returns empty
+    if (this.index) {
+      const results = this.index.search(keyword);
+      if (results.length > 0) return results;
+    }
     const lower = keyword.toLowerCase();
     return Array.from(this.entries.values()).filter(entry =>
       entry.scenario.toLowerCase().includes(lower) ||
@@ -96,11 +117,17 @@ export class NegativeKnowledgeStore {
     if (!fs.existsSync(this.solutionsDir)) {
       fs.mkdirSync(this.solutionsDir, { recursive: true });
     }
-    for (const entry of this.entries.values()) {
+
+    for (const id of this.dirtyIds) {
+      const entry = this.entries.get(id);
+      if (!entry) continue;
+
       const filename = `${entry.id}.md`;
       const filepath = path.join(this.solutionsDir, filename);
       fs.writeFileSync(filepath, this.toMarkdown(entry), 'utf-8');
     }
+
+    this.dirtyIds.clear();
   }
 
   loadFromDisk(): void {
@@ -111,6 +138,13 @@ export class NegativeKnowledgeStore {
       const entry = this.parseMarkdown(content, file.replace('.md', ''));
       if (entry) {
         this.entries.set(entry.id, entry);
+      }
+    }
+
+    // Re-index loaded entries if index is active
+    if (this.index) {
+      for (const entry of this.entries.values()) {
+        this.index.index(entry);
       }
     }
   }

@@ -9,25 +9,33 @@ import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
 
 export type GeminiModel =
-  | 'gemini-1.5-flash'   // Fast, cheap — routine tasks
-  | 'gemini-1.5-pro'     // Balanced — standard coding
-  | 'gemini-2.0-flash';  // Latest flash — fast reasoning
+  | 'gemini-3-flash-preview'  // Fast — routine/standard tasks
+  | 'gemini-3.1-pro-preview'; // Most capable — complex tasks
 
 export class GeminiProvider implements LLMProvider {
   private client: GoogleGenerativeAI;
   private model: GeminiModel;
+  private timeoutMs: number;
 
-  constructor(model: GeminiModel = 'gemini-1.5-pro') {
+  constructor(model: GeminiModel = 'gemini-3-flash-preview', timeoutMs = 60000) {
     if (!process.env.GOOGLE_API_KEY) {
       throw new Error('GOOGLE_API_KEY environment variable is not set');
     }
     this.client = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
     this.model = model;
+    this.timeoutMs = timeoutMs;
+  }
+
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('LLM call timed out after ' + ms + 'ms')), ms);
+      promise.then(val => { clearTimeout(timer); resolve(val); }, err => { clearTimeout(timer); reject(err); });
+    });
   }
 
   async call(prompt: string): Promise<string> {
     const generativeModel = this.client.getGenerativeModel({ model: this.model });
-    const result = await generativeModel.generateContent(prompt);
+    const result = await this.withTimeout(generativeModel.generateContent(prompt), this.timeoutMs);
     const response = result.response;
     return response.text();
   }

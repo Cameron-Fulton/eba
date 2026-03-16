@@ -58,6 +58,8 @@ const DEFAULT_ACTION_CLASSIFICATIONS: ActionClassification[] = [
   { action: 'config_change', category: 'infrastructure', risk_level: 'high', requires_approval: true },
   { action: 'test_run', category: 'execution', risk_level: 'low', requires_approval: false },
   { action: 'bash_execute', category: 'execution', risk_level: 'medium', requires_approval: false },
+  { action: 'consortium_escalation', category: 'orchestration', risk_level: 'high', requires_approval: true },
+  { action: 'memory_packet_write', category: 'filesystem', risk_level: 'low', requires_approval: false },
 ];
 
 export class ThreePillarModel {
@@ -133,6 +135,10 @@ export class ThreePillarModel {
 
   registerActionClassification(classification: ActionClassification): void {
     this.actionClassifications.set(classification.action, classification);
+  }
+
+  setApprovalHandler(handler: ApprovalHandler): void {
+    this.approvalHandler = handler;
   }
 
   async checkAndApprove(action: string, requestedBy: string): Promise<{ approved: boolean; request: ApprovalRequest }> {

@@ -24,6 +24,15 @@ describe('SOP Engine', () => {
     expect(step.id).toBe('plan');
   });
 
+  test('getCurrentStep returns null before start, then updates through transitions', () => {
+    expect(engine.getCurrentStep()).toBeNull();
+
+    engine.start('refactoring');
+    expect(engine.getCurrentStep()?.id).toBe('analyze');
+
+    engine.advance('plan');
+    expect(engine.getCurrentStep()?.id).toBe('plan');
+  });
   test('rejects invalid step transition', () => {
     engine.start('refactoring');
     expect(() => engine.advance('complete')).toThrow('Cannot advance');

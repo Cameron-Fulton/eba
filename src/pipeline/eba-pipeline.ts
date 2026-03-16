@@ -27,8 +27,11 @@ import { NegativeKnowledgeStore }   from '../phase1/negative-knowledge';
 import { CompressionAgent }         from '../phase1/compression-agent';
 import { ToolShed }                 from '../phase2/tool-shed';
 import { SOPEngine }                from '../phase2/sop';
+import { ThreadManager, Episode }   from '../phase2/thread-manager';
+import { createOrchestratorExecutor } from '../phase2/thread-executor';
 import { ConsortiumVoter }          from '../phase3/consortium-voter';
 import { ThreePillarModel }         from '../phase3/three-pillar-model';
+import { VisualProofSystem, ProofContext } from '../phase3/visual-proof';
 import { PromptEnhancer }           from './prompt-enhancer';
 
 export interface EBAPipelineConfig {
@@ -62,6 +65,19 @@ export interface EBAPipelineConfig {
   contextSaturationThreshold?: number;
   /** Session id for memory packet (default: auto-generated) */
   sessionId?:        string;
+  /** Optional visual proof system — registers post_test hooks run after a successful attempt */
+  visualProofSystem?: VisualProofSystem;
+  /** Path to write the proof markdown report (default: docs/demo.md relative to docsDir parent) */
+  visualProofOutputPath?: string;
+  /**
+   * Risk enforcement mode for the Three-Pillar Model.
+   * - 'dev': auto-approve everything (default, current behavior)
+   * - 'strict': deny all high/critical actions automatically
+   * - 'configurable': use the approvalHandler provided on the ThreePillarModel instance
+   */
+  approvalMode?: 'dev' | 'strict' | 'configurable';
+  /** Thread manager config (default: timeout_ms=120000, max_concurrent=1) */
+  threadManagerConfig?: { timeout_ms: number; max_concurrent: number; maxEpisodeHistory?: number };
 }
 
 export interface PipelineResult {
@@ -81,6 +97,7 @@ export class EBAPipeline {
     this.config = config;
     this.negativeKnowledge = new NegativeKnowledgeStore(config.solutionsDir);
     this.sessionId = config.sessionId ?? `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    this.applyApprovalMode();
   }
 
   async run(): Promise<PipelineResult> {
@@ -94,6 +111,15 @@ export class EBAPipeline {
     // 2. Start SOP
     const initialStep = this.config.sop.start(this.config.sopId);
     console.log(`📋 SOP started: ${initialStep.name}`);
+
+    const activeTaskPath = path.join(this.config.docsDir, 'ACTIVE_TASK.md');
+    const activeTask = fs.existsSync(activeTaskPath)
+      ? fs.readFileSync(activeTaskPath, 'utf-8').trim()
+      : null;
+
+    if (!activeTask) {
+      throw new Error('No active task found in ACTIVE_TASK.md');
+    }
 
     // 3. Wrap primary provider with prompt enhancer
     const enhancer = new PromptEnhancer({
@@ -119,13 +145,58 @@ export class EBAPipeline {
       testRunner:                 this.config.testRunner,
     });
 
-    const activeTask = orchestrator.readActiveTask() ?? '';
+    const allowedTools = this.config.toolShed
+      .selectTools(activeTask)
+      .map(tool => tool.name);
+
+    const threadManagerConfig = {
+      timeout_ms: 120_000,
+      max_concurrent: 1,
+      ...this.config.threadManagerConfig,
+    };
+
+    let previousFailureOutput: string | undefined;
+    const maxRetries = this.config.maxRetries ?? 3;
     let logs: ExecutionLog[] = [];
 
-    try {
-      logs = await orchestrator.executeTask();
-    } catch (err) {
-      console.error('Orchestrator error:', err);
+    let executor = createOrchestratorExecutor({
+      llmProvider: enhancer,
+      testRunner: this.config.testRunner,
+      attemptNumber: 1,
+      previousFailureOutput,
+      contextSaturationThreshold: this.config.contextSaturationThreshold ?? 50_000,
+    });
+
+    const threadManager = new ThreadManager(
+      threadManagerConfig,
+      (task, tools) => executor(task, tools)
+    );
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      executor = createOrchestratorExecutor({
+        llmProvider: enhancer,
+        testRunner: this.config.testRunner,
+        attemptNumber: attempt,
+        previousFailureOutput,
+        contextSaturationThreshold: this.config.contextSaturationThreshold ?? 50_000,
+      });
+
+      const episode = await threadManager.dispatch(activeTask, allowedTools);
+      const log = {
+        ...this.convertEpisodeToLog(episode, activeTask),
+        attempt,
+      };
+
+      logs.push(log);
+
+      if (episode.status === 'success') {
+        // Run visual proof hooks if system registered
+        if (this.config.visualProofSystem) {
+          await this.runVisualProofHooks(activeTask, this.config.visualProofSystem);
+        }
+        break;
+      }
+      previousFailureOutput = episode.errors_encountered.join('\n') || undefined;
     }
 
     const lastLog   = logs[logs.length - 1];
@@ -134,33 +205,41 @@ export class EBAPipeline {
     // ── ESCALATE TO CONSORTIUM IF FAILING ────────────────────────────────────
 
     if (!succeeded && logs.length >= 2) {
-      console.log('\n🗳️  Escalating to consortium voter for consensus...');
-      try {
-        const consensusPrompt = [
-          `Task: ${activeTask}`,
-          'The primary model has failed multiple attempts. Provide a clear, concrete implementation plan.',
-          'Be specific about what code to write and what approach to take.',
-        ].join('\n');
+      const { approved: consortiumApproved } = await this.config.threePillar.checkAndApprove(
+        'consortium_escalation',
+        'pipeline'
+      );
 
-        const voteResult = await this.config.consortiumVoter.vote(consensusPrompt);
+      if (consortiumApproved) {
+        console.log('\n🗳️  Escalating to consortium voter for consensus...');
+        try {
+          const consensusPrompt = [
+            `Task: ${activeTask}`,
+            'The primary model has failed multiple attempts. Provide a clear, concrete implementation plan.',
+            'Be specific about what code to write and what approach to take.',
+          ].join('\n');
 
-        if (voteResult.consensus) {
-          console.log(`✅ Consortium reached consensus (confidence: ${(voteResult.confidence * 100).toFixed(0)}%)`);
-          this.config.threePillar.recordDecision(
-            'consortium',
-            `Consensus approach: ${voteResult.consensus.slice(0, 100)}...`,
-            `Quorum reached with ${voteResult.cluster_size}/${voteResult.total_votes} models agreeing`,
-            voteResult.all_responses.map(r => r.provider),
-            'medium'
-          );
-        } else {
-          console.log(`⚠️  Consortium could not reach quorum (confidence: ${(voteResult.confidence * 100).toFixed(0)}%)`);
+          const voteResult = await this.config.consortiumVoter.vote(consensusPrompt);
+
+          if (voteResult.consensus) {
+            console.log(`✅ Consortium reached consensus (confidence: ${(voteResult.confidence * 100).toFixed(0)}%)`);
+            this.config.threePillar.recordDecision(
+              'consortium',
+              `Consensus approach: ${voteResult.consensus.slice(0, 100)}...`,
+              `Quorum reached with ${voteResult.cluster_size}/${voteResult.total_votes} models agreeing`,
+              voteResult.all_responses.map(r => r.provider),
+              'medium'
+            );
+          } else {
+            console.log(`⚠️  Consortium could not reach quorum (confidence: ${(voteResult.confidence * 100).toFixed(0)}%)`);
+          }
+        } catch (err) {
+          console.warn('Consortium voter error (non-fatal):', err);
         }
-      } catch (err) {
-        console.warn('Consortium voter error (non-fatal):', err);
+      } else {
+        console.warn('⛔ [3PM] Consortium escalation denied — skipping consensus vote');
       }
     }
-
     // ── POST-TASK ─────────────────────────────────────────────────────────────
 
     // Advance SOP to complete
@@ -233,6 +312,72 @@ export class EBAPipeline {
       logs,
       packetPath,
       sessionId:  this.sessionId,
+    };
+  }
+
+  private applyApprovalMode(): void {
+    const mode = this.config.approvalMode ?? 'dev';
+    if (mode === 'dev') {
+      this.config.threePillar.setApprovalHandler(async () => true);
+    } else if (mode === 'strict') {
+      this.config.threePillar.setApprovalHandler(async (request) => {
+        console.warn(`⛔ [3PM strict] Action '${request.action}' (risk: ${request.risk_level}) denied by strict mode`);
+        return false;
+      });
+    }
+    // 'configurable' — leave the handler as-is on the ThreePillarModel instance
+  }
+
+  private async runVisualProofHooks(task: string, vps: VisualProofSystem): Promise<void> {
+    const hooks = vps.getHooksByTrigger('post_test');
+    if (hooks.length === 0) return;
+
+    console.log(`\n📸 Running ${hooks.length} visual proof hook(s)...`);
+
+    const context: ProofContext = {
+      task_description: task,
+    };
+
+    const reports = await Promise.allSettled(
+      hooks.map(hook => vps.executeHook(hook.name, context))
+    );
+
+    const markdown: string[] = [];
+    for (const result of reports) {
+      if (result.status === 'fulfilled') {
+        const report = result.value;
+        console.log(`  ✅ ${report.task} — ${report.status} (${report.checks.length} checks)`);
+        markdown.push(report.markdown);
+      } else {
+        console.warn('  ⚠️  Visual proof hook failed (non-fatal):', result.reason);
+      }
+    }
+
+    if (markdown.length > 0) {
+      try {
+        const outputPath = this.config.visualProofOutputPath
+          ?? path.join(path.dirname(this.config.docsDir), 'demo.md');
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, markdown.join('\n\n---\n\n'), 'utf-8');
+        console.log(`  📝 Proof report written: ${outputPath}`);
+      } catch (err) {
+        console.warn('  ⚠️  Could not write visual proof report (non-fatal):', err);
+      }
+    }
+  }
+
+  private convertEpisodeToLog(episode: Episode, task: string): ExecutionLog {
+    return {
+      timestamp: episode.timestamp,
+      task,
+      attempt: 1,
+      llm_response: episode.result_summary,
+      test_result: {
+        passed: episode.artifacts_produced.includes('tests_passed'),
+        output: episode.errors_encountered.join('\n'),
+        duration_ms: episode.duration_ms,
+      },
+      status: episode.status === 'success' ? 'success' : 'failure',
     };
   }
 

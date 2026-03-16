@@ -43,6 +43,7 @@ export class BlueprintOrchestrator {
   private config: OrchestratorConfig;
   private contextTokens: number = 0;
   private attempt: number = 0;
+  private lastTestOutput: string = '';
 
   constructor(config: OrchestratorConfig) {
     this.config = config;
@@ -61,53 +62,88 @@ export class BlueprintOrchestrator {
       throw new Error('No active task found in ACTIVE_TASK.md');
     }
 
+    this.lastTestOutput = '';
+
     for (this.attempt = 1; this.attempt <= this.config.maxRetries; this.attempt++) {
-      // Fresh agent each attempt (Ralph Wiggum pattern)
-      this.contextTokens = 0;
+      const log = await this.executeSingleAttempt(
+        task,
+        this.attempt,
+        this.attempt > 1 ? this.lastTestOutput : undefined
+      );
 
-      const prompt = this.buildPrompt(task, this.attempt);
-      this.contextTokens += Math.ceil(prompt.length / 4);
-
-      let llmResponse: string;
-      try {
-        llmResponse = await this.config.llmProvider.call(prompt);
-        this.contextTokens += Math.ceil(llmResponse.length / 4);
-      } catch (err) {
-        const log = this.createLog(task, '', { passed: false, output: `LLM error: ${err}`, duration_ms: 0 }, 'failure');
-        logs.push(log);
-        continue;
-      }
-
-      // Check context saturation
-      if (this.contextTokens > this.config.contextSaturationThreshold) {
-        const log = this.createLog(task, llmResponse, { passed: false, output: 'Context saturated', duration_ms: 0 }, 'restarted');
-        logs.push(log);
-        this.writeLog(log);
-        continue; // Kill and restart fresh
-      }
-
-      // Run deterministic tests
-      const testResult = await this.config.testRunner.run();
-
-      const status = testResult.passed ? 'success' : 'failure';
-      const log = this.createLog(task, llmResponse, testResult, status);
       logs.push(log);
-      this.writeLog(log);
+      if (log.status !== 'restarted' && log.llm_response !== '') {
+        this.lastTestOutput = log.test_result.output;
+      }
 
-      if (testResult.passed) {
+      if (log.status === 'success') {
         break; // Task succeeded
       }
-      // Test failed — Ralph Wiggum: kill this agent, restart fresh
+      // Failure/restart — Ralph Wiggum: kill this agent, restart fresh
     }
 
     return logs;
   }
 
-  private buildPrompt(task: string, attempt: number): string {
-    const parts = [`Task: ${task}`];
-    if (attempt > 1) {
-      parts.push(`This is attempt ${attempt}. Previous attempts failed. Try a different approach.`);
+  public async executeSingleAttempt(
+    task: string,
+    attempt: number,
+    previousFailureOutput?: string
+  ): Promise<ExecutionLog> {
+    this.attempt = attempt;
+    // Fresh agent each attempt (Ralph Wiggum pattern)
+    this.contextTokens = 0;
+
+    const prompt = this.buildPrompt(task, attempt, previousFailureOutput);
+    this.contextTokens += Math.ceil(prompt.length / 4);
+
+    let llmResponse: string;
+    try {
+      llmResponse = await this.config.llmProvider.call(prompt);
+      this.contextTokens += Math.ceil(llmResponse.length / 4);
+    } catch (err) {
+      const log = this.createLog(
+        task,
+        '',
+        { passed: false, output: `LLM error: ${err}`, duration_ms: 0 },
+        'failure'
+      );
+      this.writeLog(log);
+      return log;
     }
+
+    // Check context saturation
+    if (this.contextTokens > this.config.contextSaturationThreshold) {
+      const log = this.createLog(
+        task,
+        llmResponse,
+        { passed: false, output: 'Context saturated', duration_ms: 0 },
+        'restarted'
+      );
+      this.writeLog(log);
+      return log;
+    }
+
+    // Run deterministic tests
+    const testResult = await this.config.testRunner.run();
+    const status = testResult.passed ? 'success' : 'failure';
+    const log = this.createLog(task, llmResponse, testResult, status);
+    this.writeLog(log);
+
+    return log;
+  }
+
+  private buildPrompt(task: string, attempt: number, previousFailureOutput?: string): string {
+    const parts = [`Task: ${task}`];
+
+    if (attempt > 1) {
+      parts.push('');
+      parts.push(`This is attempt ${attempt}. The previous attempt failed with this test output:`);
+      parts.push(previousFailureOutput ?? 'No previous test output available.');
+      parts.push('');
+      parts.push('Analyze the failure above and try a different approach.');
+    }
+
     return parts.join('\n');
   }
 

@@ -11,15 +11,18 @@
  *   ANTHROPIC_API_KEY   — required
  *   GOOGLE_API_KEY      — required
  *   OPENAI_API_KEY      — required
+ *   OPENROUTER_API_KEY  — required only when PRIMARY_MODEL=openrouter
  *   TEST_COMMAND        — shell command used to verify work (default: "npm test")
- *   PRIMARY_MODEL       — claude | gemini | openai (default: claude)
+ *   PRIMARY_MODEL       — claude | gemini | openai | openrouter (default: claude)
  */
 
 import * as path from 'path';
 import * as fs   from 'fs';
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
 
 import { ModelRouter } from './providers/model-router';
+import { startBenchmarkScheduler } from './scheduler';
 import { NegativeKnowledgeStore } from './phase1/negative-knowledge';
 import { createDefaultToolShed } from './phase2/tool-shed';
 import { SOPEngine, createRefactoringSOP } from './phase2/sop';
@@ -36,24 +39,27 @@ const SOLUTIONS_DIR = path.join(DOCS_DIR, 'solutions');
 async function main() {
   console.log('\n🚀 Episodic Blueprint Architecture — starting up\n');
 
+  // --- Config from env ---
+  const testCommand  = process.env.TEST_COMMAND ?? 'npm test';
+  const primaryModel = (process.env.PRIMARY_MODEL ?? 'claude') as 'claude' | 'gemini' | 'openai' | 'openrouter';
+
   // --- Validate env ---
-  const missing = ['ANTHROPIC_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'].filter(
-    k => !process.env[k]
-  );
+  const requiredKeys = ['ANTHROPIC_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'];
+  if (primaryModel === 'openrouter') {
+    requiredKeys.push('OPENROUTER_API_KEY');
+  }
+
+  const missing = requiredKeys.filter(k => !process.env[k]);
   if (missing.length > 0) {
     console.error(`❌ Missing environment variables: ${missing.join(', ')}`);
     console.error('   Copy .env.example to .env and fill in your keys.');
     process.exit(1);
   }
 
-  // --- Config from env ---
-  const testCommand  = process.env.TEST_COMMAND ?? 'npm test';
-  const primaryModel = (process.env.PRIMARY_MODEL ?? 'claude') as 'claude' | 'gemini' | 'openai';
-
   // --- Bootstrap components ---
   const router = new ModelRouter({ primary: primaryModel, enableConsortium: true });
+  startBenchmarkScheduler(router);
   const consortiumVoter = router.getConsortiumVoter();
-
   const negativeKnowledge = new NegativeKnowledgeStore(SOLUTIONS_DIR);
   negativeKnowledge.loadFromDisk();
   console.log(`📚 Loaded ${negativeKnowledge.getAll().length} negative knowledge entries`);

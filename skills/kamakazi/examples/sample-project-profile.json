@@ -1,0 +1,25 @@
+{
+	"project_name": "invoice-sync",
+	"description": "Sync invoices from Stripe to internal billing dashboard",
+	"target_apis": [
+		{
+			"name": "Stripe",
+			"version": "latest",
+			"sdk": "stripe (npm)",
+			"docs_url": "https://docs.stripe.com/api"
+		}
+	],
+	"language": "TypeScript",
+	"framework": "Next.js",
+	"auth_method": "API key (secret key in header)",
+	"core_flows": [
+		"create invoice",
+		"list invoices",
+		"send invoice",
+		"handle webhooks"
+	],
+	"platform": "web backend",
+	"environment": "local dev",
+	"generated_at": "2026-02-17T12:00:00Z",
+	"context7_libraries_used": ["stripe/stripe-node"]
+}
