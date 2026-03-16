@@ -79,12 +79,15 @@ export class ThreePillarModel {
     }
   }
 
-  // --- Transparency ---
+  private generateId(prefix: string): string {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  }
 
+  // --- Transparency ---
   logStateChange(actor: string, action: string, before: string, after: string): StateChangeLog {
     const classification = this.actionClassifications.get(action);
     const log: StateChangeLog = {
-      id: `sc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: this.generateId('sc'),
       timestamp: new Date().toISOString(),
       actor,
       action,
@@ -111,7 +114,7 @@ export class ThreePillarModel {
     riskLevel: RiskLevel = 'low'
   ): DecisionJournalEntry {
     const entry: DecisionJournalEntry = {
-      id: `dj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: this.generateId('dj'),
       timestamp: new Date().toISOString(),
       actor,
       decision,
@@ -147,7 +150,7 @@ export class ThreePillarModel {
     const needsApproval = classification?.requires_approval ?? (riskLevel === 'high' || riskLevel === 'critical');
 
     const request: ApprovalRequest = {
-      id: `ar_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: this.generateId('ar'),
       timestamp: new Date().toISOString(),
       action,
       risk_level: riskLevel,

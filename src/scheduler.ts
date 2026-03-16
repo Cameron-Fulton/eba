@@ -53,7 +53,7 @@ async function runBenchmarkRefresh(configPath: string): Promise<void> {
   }
 }
 
-export function startBenchmarkScheduler(_router: ModelRouter): NodeJS.Timeout {
+export function startBenchmarkScheduler(): NodeJS.Timeout {
   const config = readSchedulerConfig(MODEL_CONFIG_PATH);
   const intervalHours = config.interval_hours;
   const intervalMs = intervalHours * 60 * 60 * 1000;

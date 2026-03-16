@@ -15,6 +15,7 @@
 
 import { LLMProvider } from './orchestrator';
 import { MemoryPacket, validateMemoryPacket } from './memory-packet';
+import { randomUUID } from 'crypto';
 
 export interface CompressionAgentConfig {
   /** A fast, cheap provider — Haiku or Flash recommended */
@@ -60,6 +61,8 @@ SESSION TRANSCRIPT:
 ${transcript}
 `;
 
+const FIDELITY_SCORE = 0.97;
+
 export class CompressionAgent {
   private config: CompressionAgentConfig;
 
@@ -96,7 +99,7 @@ export class CompressionAgent {
       : 1;
 
     const packet: MemoryPacket = {
-      id:          `pkt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      id:          `pkt_${Date.now()}_${randomUUID().replace(/-/g, '').substring(0, 8)}`,
       timestamp:   new Date().toISOString(),
       session_id:  this.config.sessionId,
       summary:     String(extracted.summary ?? ''),
@@ -109,7 +112,7 @@ export class CompressionAgent {
         original_token_count:    originalTokens,
         compressed_token_count:  compressedTokens,
         compression_ratio:       compressionRatio,
-        fidelity_score:          0.97,
+        fidelity_score:          FIDELITY_SCORE,
       },
     };
 

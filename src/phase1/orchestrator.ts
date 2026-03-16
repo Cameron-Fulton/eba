@@ -41,7 +41,6 @@ export interface ExecutionLog {
 
 export class BlueprintOrchestrator {
   private config: OrchestratorConfig;
-  private contextTokens: number = 0;
   private attempt: number = 0;
   private lastTestOutput: string = '';
 
@@ -172,10 +171,6 @@ export class BlueprintOrchestrator {
     const filename = `log_${Date.now()}_attempt${log.attempt}.json`;
     const filepath = path.join(this.config.logsDir, filename);
     fs.writeFileSync(filepath, JSON.stringify(log, null, 2), 'utf-8');
-  }
-
-  getContextTokens(): number {
-    return this.contextTokens;
   }
 
   getAttempt(): number {

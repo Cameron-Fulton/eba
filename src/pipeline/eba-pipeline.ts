@@ -20,6 +20,7 @@
 
 import * as fs   from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 
 import { LLMProvider }              from '../phase1/orchestrator';
 import { BlueprintOrchestrator, OrchestratorConfig, ExecutionLog } from '../phase1/orchestrator';
@@ -95,7 +96,7 @@ export class EBAPipeline {
   constructor(config: EBAPipelineConfig) {
     this.config = config;
     this.negativeKnowledge = new NegativeKnowledgeStore(config.solutionsDir);
-    this.sessionId = config.sessionId ?? `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    this.sessionId = config.sessionId ?? `session_${Date.now()}_${randomUUID().replace(/-/g, '').substring(0, 8)}`;
     this.applyApprovalMode();
   }
 
@@ -158,14 +159,7 @@ export class EBAPipeline {
     const maxRetries = this.config.maxRetries ?? 3;
     let logs: ExecutionLog[] = [];
 
-    let executor = createOrchestratorExecutor({
-      llmProvider: enhancer,
-      testRunner: this.config.testRunner,
-      attemptNumber: 1,
-      previousFailureOutput,
-      contextSaturationThreshold: this.config.contextSaturationThreshold ?? 50_000,
-    });
-
+    let executor: ReturnType<typeof createOrchestratorExecutor>;
     const threadManager = new ThreadManager(
       threadManagerConfig,
       (task, tools) => executor(task, tools)

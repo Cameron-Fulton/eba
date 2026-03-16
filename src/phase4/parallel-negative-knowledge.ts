@@ -19,7 +19,6 @@ export interface TaskAttempt {
 export class ParallelNegativeKnowledge {
   private store: NegativeKnowledgeStore;
   private attempts: TaskAttempt[] = [];
-  private readLock: Promise<void> = Promise.resolve();
 
   constructor(store: NegativeKnowledgeStore) {
     this.store = store;
@@ -29,9 +28,7 @@ export class ParallelNegativeKnowledge {
    * Check the store for known failures before starting work.
    * Returns approaches that should be avoided for a given task.
    */
-  async checkBeforeAttempt(task: string): Promise<NegativeKnowledgeEntry[]> {
-    // Serialize reads to prevent interleaving issues
-    await this.readLock;
+  checkBeforeAttempt(task: string): NegativeKnowledgeEntry[] {
     return this.store.searchByKeyword(task);
   }
 
@@ -39,7 +36,7 @@ export class ParallelNegativeKnowledge {
    * Get a filtered list of approaches to avoid, extracted from negative knowledge.
    */
   async getAvoidedApproaches(task: string): Promise<string[]> {
-    const entries = await this.checkBeforeAttempt(task);
+    const entries = this.checkBeforeAttempt(task);
     return entries.map(e => e.attempt);
   }
 

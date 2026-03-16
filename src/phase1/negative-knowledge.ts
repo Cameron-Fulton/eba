@@ -171,7 +171,7 @@ export class NegativeKnowledgeStore {
     const files = fs.readdirSync(this.solutionsDir).filter(f => f.endsWith('.md'));
     for (const file of files) {
       const content = fs.readFileSync(path.join(this.solutionsDir, file), 'utf-8');
-      const entry = this.parseMarkdown(content, file.replace('.md', ''));
+      const entry = parseNKMarkdown(content, file.replace('.md', ''));
       if (entry) {
         this.entries.set(entry.id, entry);
       }
@@ -192,9 +192,5 @@ export class NegativeKnowledgeStore {
       this.index.close();
       this.index = null;
     }
-  }
-
-  private parseMarkdown(content: string, fallbackId: string): NegativeKnowledgeEntry | null {
-    return parseNKMarkdown(content, fallbackId);
   }
 }

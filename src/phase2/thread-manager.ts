@@ -4,6 +4,8 @@
  * and return compressed Episodes — not full conversation traces.
  */
 
+import { withTimeout } from '../providers/utils';
+
 export interface Episode {
   thread_id: string;
   task: string;
@@ -77,7 +79,7 @@ export class ThreadManager {
     const start = Date.now();
 
     try {
-      const result = await this.withTimeout(
+      const result = await withTimeout(
         this.executor(task, tools),
         this.config.timeout_ms
       );
@@ -121,21 +123,6 @@ export class ThreadManager {
     if (excess > 0) {
       this.completedEpisodes.splice(0, excess);
     }
-  }
-
-  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Thread timed out after ${ms}ms`)), ms);
-      // Prevent timeout guard from keeping Node's event loop alive.
-      if (typeof (timer as NodeJS.Timeout).unref === 'function') {
-        (timer as NodeJS.Timeout).unref();
-      }
-
-      promise.then(
-        val => { clearTimeout(timer); resolve(val); },
-        err => { clearTimeout(timer); reject(err); }
-      );
-    });
   }
 
   async dispatch(task: string, tools: string[]): Promise<Episode> {

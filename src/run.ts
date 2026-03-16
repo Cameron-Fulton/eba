@@ -65,7 +65,7 @@ if (SHELL_METACHARACTERS.test(testCommand)) {
 
   // --- Bootstrap components ---
   const router = new ModelRouter({ primary: primaryModel, enableConsortium: true });
-  const schedulerHandle = startBenchmarkScheduler(router);
+  const schedulerHandle = startBenchmarkScheduler();
   process.on('exit', () => clearInterval(schedulerHandle));
   process.on('SIGINT', () => { clearInterval(schedulerHandle); process.exit(0); });
   process.on('SIGTERM', () => { clearInterval(schedulerHandle); process.exit(0); });

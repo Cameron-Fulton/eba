@@ -12,6 +12,9 @@ import type { NegativeKnowledgeEntry } from './negative-knowledge';
 export class AIIndex {
   private db: Database.Database;
   private ready = false;
+  private readonly stmtUpsertEntry!: Database.Statement;
+  private readonly stmtDeleteFts!: Database.Statement;
+  private readonly stmtInsertFts!: Database.Statement;
 
   constructor(private readonly dbPath: string) {
     const dir = path.dirname(dbPath);
@@ -40,28 +43,24 @@ export class AIIndex {
       );
     `);
     this.ready = true;
+    (this as any).stmtUpsertEntry = this.db.prepare(`
+      INSERT INTO nk_entries (id, data) VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET data = excluded.data
+    `);
+    (this as any).stmtDeleteFts = this.db.prepare(`DELETE FROM nk_fts WHERE id = ?`);
+    (this as any).stmtInsertFts = this.db.prepare(`
+      INSERT INTO nk_fts (id, scenario, attempt, outcome, solution, tags)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
   }
 
   index(entry: NegativeKnowledgeEntry): void {
     if (!this.ready) return;
 
-    // Upsert into entries table
-    const upsertEntry = this.db.prepare(`
-      INSERT INTO nk_entries (id, data) VALUES (?, ?)
-      ON CONFLICT(id) DO UPDATE SET data = excluded.data
-    `);
-
-    // Delete old FTS row then reinsert (FTS5 doesn't support ON CONFLICT)
-    const deleteFts = this.db.prepare(`DELETE FROM nk_fts WHERE id = ?`);
-    const insertFts = this.db.prepare(`
-      INSERT INTO nk_fts (id, scenario, attempt, outcome, solution, tags)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
     const run = this.db.transaction(() => {
-      upsertEntry.run(entry.id, JSON.stringify(entry));
-      deleteFts.run(entry.id);
-      insertFts.run(
+      this.stmtUpsertEntry.run(entry.id, JSON.stringify(entry));
+      this.stmtDeleteFts.run(entry.id);
+      this.stmtInsertFts.run(
         entry.id,
         entry.scenario,
         entry.attempt,
