@@ -5,7 +5,7 @@
  */
 
 import OpenAI, { APIError } from 'openai';
-import type { ChatCompletion } from 'openai/resources/chat/completions';
+import type { ChatCompletion, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 import { LLMProvider } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
 import { withTimeout } from './utils';
@@ -16,11 +16,22 @@ import { withTimeout } from './utils';
  */
 export type OpenRouterModel = string;
 
+/** Shape of the usage object returned by OpenRouter (extends the standard OpenAI usage). */
+interface OpenRouterUsage {
+  cost?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+}
+
+/** Typed alias for the OpenRouter chat completion request payload. */
+type OpenRouterRequest = ChatCompletionCreateParamsNonStreaming;
+
 export class OpenRouterProvider implements LLMProvider {
-  private client: OpenAI;
-  private model: OpenRouterModel;
-  private maxTokens: number;
-  private timeoutMs: number;
+  private readonly client: OpenAI;
+  private readonly model: OpenRouterModel;
+  private readonly maxTokens: number;
+  private readonly timeoutMs: number;
 
   constructor(model: OpenRouterModel, maxTokens = 8192, timeoutMs = 60000) {
     if (!process.env.OPENROUTER_API_KEY) {
@@ -41,8 +52,12 @@ export class OpenRouterProvider implements LLMProvider {
     this.timeoutMs = timeoutMs;
   }
 
+  getModel(): OpenRouterModel { return this.model; }
+  getMaxTokens(): number { return this.maxTokens; }
+  getTimeoutMs(): number { return this.timeoutMs; }
+
   async call(prompt: string): Promise<string> {
-    const request: Parameters<typeof this.client.chat.completions.create>[0] = {
+    const request: OpenRouterRequest = {
       model: this.model,
       messages: [{ role: 'user', content: prompt }],
       stream: false as const,
@@ -62,9 +77,10 @@ export class OpenRouterProvider implements LLMProvider {
       throw error;
     }
 
-    const usage = (completion as any).usage;
+    const usage = (completion as ChatCompletion & { usage?: OpenRouterUsage }).usage;
     if (usage?.cost !== undefined) {
-      console.log('[OpenRouter] cost=$' + usage.cost + ' reasoning_tokens=' + (usage?.completion_tokens_details?.reasoning_tokens ?? 0));
+      const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? 0;
+      console.log(`[OpenRouter] cost=$${usage.cost} reasoning_tokens=${reasoningTokens}`);
     }
 
     const content = completion.choices[0]?.message?.content;

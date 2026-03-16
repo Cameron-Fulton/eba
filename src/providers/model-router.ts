@@ -15,9 +15,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { LLMProvider } from '../phase1/orchestrator';
-import { ClaudeProvider } from './claude-provider';
-import { GeminiProvider } from './gemini-provider';
-import { OpenAIProvider } from './openai-provider';
+import { ClaudeProvider, ClaudeModel } from './claude-provider';
+import { GeminiProvider, GeminiModel } from './gemini-provider';
+import { OpenAIProvider, OpenAIModel } from './openai-provider';
 import { OpenRouterProvider } from './openrouter-provider';
 import { ConsortiumVoter, ConsortiumConfig } from '../phase3/consortium-voter';
 
@@ -30,54 +30,79 @@ export interface ModelRouterConfig {
   enableConsortium: boolean;
 }
 
-interface OpenRouterTierConfig {
-  routine: string;
-  standard: string;
-  complex: string;
-}
+// ── Default model identifiers ──────────────────────────────────────────────
+
+const CLAUDE_MODELS: Record<TaskComplexity, ClaudeModel> = {
+  routine:  'claude-haiku-4-5',
+  standard: 'claude-sonnet-4-6',
+  complex:  'claude-opus-4-6',
+};
+
+const GEMINI_MODELS: Record<TaskComplexity, GeminiModel> = {
+  routine:  'gemini-3-flash-preview',
+  standard: 'gemini-3.1-pro-preview',
+  complex:  'gemini-3.1-pro-preview',
+};
+
+const OPENAI_MODELS: Record<TaskComplexity, OpenAIModel> = {
+  routine:  'gpt-5-mini',
+  standard: 'gpt-5',
+  complex:  'o3',
+};
+
+const DEFAULT_OPENROUTER_MODELS: Record<TaskComplexity, string> = {
+  routine:  'qwen/qwen3-coder',
+  standard: 'minimax/minimax-m2.5',
+  complex:  'moonshotai/kimi-k2-thinking',
+};
+
+// ── Config file types ──────────────────────────────────────────────────────
 
 interface OpenRouterConfigFile {
   updated_at?: string;
   interval_hours?: number;
-  openrouter?: Partial<OpenRouterTierConfig>;
+  openrouter?: Partial<Record<TaskComplexity, string>>;
 }
 
 const MODEL_CONFIG_PATH = path.resolve(__dirname, 'model-config.json');
 
-const DEFAULT_OPENROUTER_MODELS: OpenRouterTierConfig = {
-  routine: 'qwen/qwen3-coder',
-  standard: 'minimax/minimax-m2.5',
-  complex: 'moonshotai/kimi-k2-thinking',
-};
+// ── Helper ─────────────────────────────────────────────────────────────────
+
+/** Picks the provider instance matching the requested complexity tier. */
+function pickTier<T>(tiers: Record<TaskComplexity, T>, complexity: TaskComplexity): T {
+  return tiers[complexity];
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 
 export class ModelRouter {
   private static instances = new Set<ModelRouter>();
 
-  private claude: { routine: ClaudeProvider; standard: ClaudeProvider; complex: ClaudeProvider };
-  private gemini: { routine: GeminiProvider; standard: GeminiProvider; complex: GeminiProvider };
-  private openai: { routine: OpenAIProvider; standard: OpenAIProvider; complex: OpenAIProvider };
-  private openrouter: { routine: OpenRouterProvider; standard: OpenRouterProvider; complex: OpenRouterProvider };
+  private claude:    Record<TaskComplexity, ClaudeProvider>;
+  private gemini:    Record<TaskComplexity, GeminiProvider>;
+  private openai:    Record<TaskComplexity, OpenAIProvider>;
+  private openrouter: Record<TaskComplexity, OpenRouterProvider>;
   private config: ModelRouterConfig;
 
   constructor(config: ModelRouterConfig = { primary: 'claude', enableConsortium: true }) {
     this.config = config;
 
     this.claude = {
-      routine: new ClaudeProvider('claude-haiku-4-5'),
-      standard: new ClaudeProvider('claude-sonnet-4-6'),
-      complex: new ClaudeProvider('claude-opus-4-6'),
+      routine:  new ClaudeProvider(CLAUDE_MODELS.routine),
+      standard: new ClaudeProvider(CLAUDE_MODELS.standard),
+      complex:  new ClaudeProvider(CLAUDE_MODELS.complex),
     };
 
     this.gemini = {
-      routine: new GeminiProvider('gemini-3-flash-preview'),
-      standard: new GeminiProvider('gemini-3.1-pro-preview'),
-      complex: new GeminiProvider('gemini-3.1-pro-preview'),
+      routine:  new GeminiProvider(GEMINI_MODELS.routine),
+      standard: new GeminiProvider(GEMINI_MODELS.standard),
+      complex:  new GeminiProvider(GEMINI_MODELS.complex),
     };
 
     this.openai = {
-      routine: new OpenAIProvider('gpt-5-mini'),
-      standard: new OpenAIProvider('gpt-5'),
-      complex: new OpenAIProvider('o3'),
+      routine:  new OpenAIProvider(OPENAI_MODELS.routine),
+      standard: new OpenAIProvider(OPENAI_MODELS.standard),
+      complex:  new OpenAIProvider(OPENAI_MODELS.complex),
     };
 
     this.openrouter = this.buildOpenRouterProviders(ModelRouter.loadOpenRouterTierConfig());
@@ -99,7 +124,7 @@ export class ModelRouter {
     );
   }
 
-  private static loadOpenRouterTierConfig(): OpenRouterTierConfig {
+  private static loadOpenRouterTierConfig(): Record<TaskComplexity, string> {
     let raw: string;
     try {
       raw = fs.readFileSync(MODEL_CONFIG_PATH, 'utf-8');
@@ -117,9 +142,9 @@ export class ModelRouter {
       const parsed = JSON.parse(raw) as OpenRouterConfigFile;
 
       return {
-        routine: parsed.openrouter?.routine ?? DEFAULT_OPENROUTER_MODELS.routine,
+        routine:  parsed.openrouter?.routine  ?? DEFAULT_OPENROUTER_MODELS.routine,
         standard: parsed.openrouter?.standard ?? DEFAULT_OPENROUTER_MODELS.standard,
-        complex: parsed.openrouter?.complex ?? DEFAULT_OPENROUTER_MODELS.complex,
+        complex:  parsed.openrouter?.complex  ?? DEFAULT_OPENROUTER_MODELS.complex,
       };
     } catch (error) {
       console.warn('[ModelRouter] model-config.json contains invalid JSON, using defaults.', error);
@@ -127,15 +152,13 @@ export class ModelRouter {
     }
   }
 
-  private buildOpenRouterProviders(tiers: OpenRouterTierConfig): {
-    routine: OpenRouterProvider;
-    standard: OpenRouterProvider;
-    complex: OpenRouterProvider;
-  } {
+  private buildOpenRouterProviders(
+    tiers: Record<TaskComplexity, string>,
+  ): Record<TaskComplexity, OpenRouterProvider> {
     return {
-      routine: new OpenRouterProvider(tiers.routine),
+      routine:  new OpenRouterProvider(tiers.routine),
       standard: new OpenRouterProvider(tiers.standard),
-      complex: new OpenRouterProvider(tiers.complex),
+      complex:  new OpenRouterProvider(tiers.complex),
     };
   }
 
@@ -145,31 +168,11 @@ export class ModelRouter {
    */
   getProvider(complexity: TaskComplexity): LLMProvider {
     switch (this.config.primary) {
-      case 'gemini':
-        return complexity === 'routine'
-          ? this.gemini.routine
-          : complexity === 'standard'
-            ? this.gemini.standard
-            : this.gemini.complex;
-      case 'openai':
-        return complexity === 'routine'
-          ? this.openai.routine
-          : complexity === 'standard'
-            ? this.openai.standard
-            : this.openai.complex;
-      case 'openrouter':
-        return complexity === 'routine'
-          ? this.openrouter.routine
-          : complexity === 'standard'
-            ? this.openrouter.standard
-            : this.openrouter.complex;
+      case 'gemini':     return pickTier(this.gemini,    complexity);
+      case 'openai':     return pickTier(this.openai,    complexity);
+      case 'openrouter': return pickTier(this.openrouter, complexity);
       case 'claude':
-      default:
-        return complexity === 'routine'
-          ? this.claude.routine
-          : complexity === 'standard'
-            ? this.claude.standard
-            : this.claude.complex;
+      default:           return pickTier(this.claude,    complexity);
     }
   }
 
@@ -197,11 +200,6 @@ export class ModelRouter {
   /** Removes this instance from the global registry. Call on shutdown to prevent memory leaks. */
   destroy(): void {
     ModelRouter.instances.delete(this);
-  }
-
-  /** Remove this instance from the static instance set to allow garbage collection. */
-  dispose(): void {
-    this.destroy();
   }
 
   /** Convenience: provider for routine compression/tool-selection tasks */
