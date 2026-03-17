@@ -53,25 +53,29 @@ export class ProjectOrchestrator {
     const latestPacket = this.loadLatestPacket();
     const openThreads: OpenThread[] = latestPacket?.open_threads ?? [];
 
-    // Filter to actionable threads only (not blocked)
+    // Actionable = next_up or backlog. Active threads are already in-flight this session;
+    // blocked threads need external resolution. Neither should be auto-selected here.
     const actionable = openThreads.filter(
       t => t.status === 'next_up' || t.status === 'backlog'
     );
 
-    if (actionable.length === 0 && openThreads.length === 0) {
-      // No prior threads — project is fresh, let existing ACTIVE_TASK.md stand
+    if (openThreads.length === 0) {
+      // Fresh project — no prior memory packets or all packets have empty thread lists.
+      // Leave ACTIVE_TASK.md untouched so a manually written task can run.
       console.log('📋 [Orchestrator] No prior open threads — using existing ACTIVE_TASK.md');
       return { chosenTask: null, chosenThread: null, projectGoal, openThreads };
     }
 
     if (actionable.length === 0) {
-      // All threads are blocked
+      // All known threads are either active (in-flight) or blocked (waiting externally).
+      // Cannot auto-select — surface this so the user can unblock manually.
       console.log('⛔ [Orchestrator] All open threads are blocked — cannot proceed automatically');
       return { chosenTask: null, chosenThread: null, projectGoal, openThreads };
     }
 
     // Use LLM to pick the highest priority task
-    const chosenThread = await this.pickNextThread(projectGoal, actionable, latestPacket);
+    const recentSummary = latestPacket?.summary ?? 'No prior session summary available.';
+    const chosenThread = await this.pickNextThread(projectGoal, actionable, recentSummary);
     if (!chosenThread) {
       return { chosenTask: null, chosenThread: null, projectGoal, openThreads };
     }
@@ -126,9 +130,9 @@ export class ProjectOrchestrator {
    * Calls the LLM to select the highest-priority actionable thread.
    */
   private async pickNextThread(
-    projectGoal: string,
-    actionable:  OpenThread[],
-    packet:      MemoryPacket | null
+    projectGoal:   string,
+    actionable:    OpenThread[],
+    recentSummary: string
   ): Promise<OpenThread | null> {
     // next_up threads always take priority — if any exist, pick the first without LLM
     const nextUp = actionable.filter(t => t.status === 'next_up');
@@ -138,8 +142,6 @@ export class ProjectOrchestrator {
     const threadList = actionable
       .map((t, i) => `[${i}] (${t.status}) ${t.topic}\n    Context: ${t.context}`)
       .join('\n');
-
-    const recentSummary = packet?.summary ?? 'No prior session summary available.';
 
     const prompt = [
       '## Project Goal',
@@ -178,6 +180,7 @@ export class ProjectOrchestrator {
       '# Active Task',
       '',
       `## Project Context`,
+      // First 5 lines — enough to convey the goal without bloating ACTIVE_TASK.md
       projectGoal ? projectGoal.split('\n').slice(0, 5).join('\n') : '(see PROJECT.md)',
       '',
       '## Task',

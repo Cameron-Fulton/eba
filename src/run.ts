@@ -43,12 +43,12 @@ async function main() {
   // --- Config from env ---
   const testCommand  = process.env.TEST_COMMAND ?? 'npm test';
 
-const SHELL_METACHARACTERS = /[;&|$`\<>]/;
-if (SHELL_METACHARACTERS.test(testCommand)) {
-  console.error(`❌ TEST_COMMAND contains disallowed shell metacharacters: "${testCommand}"`);
-  console.error('   Only safe commands are allowed (e.g. "npm test", "jest --runInBand").');
-  process.exit(1);
-}
+  const SHELL_METACHARACTERS = /[;&|$`\<>]/;
+  if (SHELL_METACHARACTERS.test(testCommand)) {
+    console.error(`❌ TEST_COMMAND contains disallowed shell metacharacters: "${testCommand}"`);
+    console.error('   Only safe commands are allowed (e.g. "npm test", "jest --runInBand").');
+    process.exit(1);
+  }
   const primaryModel = (process.env.PRIMARY_MODEL ?? 'claude') as 'claude' | 'gemini' | 'openai' | 'openrouter';
 
   // --- Validate env ---

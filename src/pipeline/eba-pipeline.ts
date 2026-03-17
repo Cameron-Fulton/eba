@@ -294,24 +294,26 @@ export class EBAPipeline {
       console.log(`   Decisions captured: ${packet.decisions.length}`);
       console.log(`   Rejected ideas: ${packet.rejected_ideas.length}`);
       console.log(`   Open threads: ${packet.open_threads.length}`);
-
-      // 9. Trigger project orchestrator to load the next task (if project mode is active)
-      if (this.config.projectOrchestrator) {
-        try {
-          const planning = await this.config.projectOrchestrator.planNextTask();
-          if (planning.chosenThread) {
-            console.log(`\n🗂️  Next task queued: ${planning.chosenThread.topic}`);
-          } else if (packet.open_threads.length > 0) {
-            console.log('\n⛔ All remaining threads are blocked — manual intervention required');
-          } else {
-            console.log('\n✅ All project threads complete');
-          }
-        } catch (err) {
-          console.warn('Project orchestrator error (non-fatal):', err);
-        }
-      }
     } catch (err) {
       console.warn('Session compression failed (non-fatal):', err);
+    }
+
+    // 9. Trigger project orchestrator to load the next task (if project mode is active).
+    //    Runs outside the compression block so it fires even if compression failed —
+    //    the orchestrator reads from disk and is not dependent on the in-memory packet.
+    if (this.config.projectOrchestrator) {
+      try {
+        const planning = await this.config.projectOrchestrator.planNextTask();
+        if (planning.chosenThread) {
+          console.log(`\n🗂️  Next task queued: ${planning.chosenThread.topic}`);
+        } else if (planning.openThreads.length > 0) {
+          console.log('\n⛔ All remaining threads are blocked — manual intervention required');
+        } else {
+          console.log('\n✅ All project threads complete');
+        }
+      } catch (err) {
+        console.warn('Project orchestrator error (non-fatal):', err);
+      }
     }
 
     // Log final state via 3PM
