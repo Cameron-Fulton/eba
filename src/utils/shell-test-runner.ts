@@ -17,6 +17,44 @@ export interface ShellTestRunnerConfig {
   timeoutMs?: number;
 }
 
+export interface RetryWithBackoffOptions {
+  maxAttempts?: number;
+  baseDelayMs?: number;
+  multiplier?: number;
+}
+
+export async function retryWithBackoff<T>(
+  operation: () => Promise<T>,
+  options: RetryWithBackoffOptions = {}
+): Promise<T> {
+  const {
+    maxAttempts = 3,
+    baseDelayMs = 500,
+    multiplier = 2,
+  } = options;
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === maxAttempts) {
+        break;
+      }
+
+      const delayMs = baseDelayMs * (multiplier ** (attempt - 1));
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, delayMs);
+      });
+    }
+  }
+
+  throw lastError;
+}
+
 export class ShellTestRunner implements TestRunner {
   private config: ShellTestRunnerConfig;
 
