@@ -34,6 +34,7 @@ import { ConsortiumVoter }          from '../phase3/consortium-voter';
 import { ThreePillarModel }         from '../phase3/three-pillar-model';
 import { VisualProofSystem, ProofContext } from '../phase3/visual-proof';
 import { PromptEnhancer }           from './prompt-enhancer';
+import { ProjectOrchestrator }      from './project-orchestrator';
 
 export interface EBAPipelineConfig {
   /** Directory containing ACTIVE_TASK.md, PROJECT.md */
@@ -77,6 +78,11 @@ export interface EBAPipelineConfig {
    * - 'configurable': use the approvalHandler provided on the ThreePillarModel instance
    */
   approvalMode?: 'dev' | 'strict' | 'configurable';
+  /**
+   * Optional project orchestrator — when provided, runs planning after each task
+   * completes and automatically loads the next task into ACTIVE_TASK.md.
+   */
+  projectOrchestrator?: ProjectOrchestrator;
   /** Thread manager config (default: timeout_ms=120000, max_concurrent=1) */
   threadManagerConfig?: { timeout_ms: number; max_concurrent: number; maxEpisodeHistory?: number };
 }
@@ -287,6 +293,23 @@ export class EBAPipeline {
       console.log(`   Compression ratio: ${packet.metadata.compression_ratio.toFixed(1)}:1`);
       console.log(`   Decisions captured: ${packet.decisions.length}`);
       console.log(`   Rejected ideas: ${packet.rejected_ideas.length}`);
+      console.log(`   Open threads: ${packet.open_threads.length}`);
+
+      // 9. Trigger project orchestrator to load the next task (if project mode is active)
+      if (this.config.projectOrchestrator) {
+        try {
+          const planning = await this.config.projectOrchestrator.planNextTask();
+          if (planning.chosenThread) {
+            console.log(`\n🗂️  Next task queued: ${planning.chosenThread.topic}`);
+          } else if (packet.open_threads.length > 0) {
+            console.log('\n⛔ All remaining threads are blocked — manual intervention required');
+          } else {
+            console.log('\n✅ All project threads complete');
+          }
+        } catch (err) {
+          console.warn('Project orchestrator error (non-fatal):', err);
+        }
+      }
     } catch (err) {
       console.warn('Session compression failed (non-fatal):', err);
     }

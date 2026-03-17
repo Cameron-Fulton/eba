@@ -36,7 +36,14 @@ export interface Risk {
 
 export interface OpenThread {
   topic: string;
-  status: 'blocked' | 'in_progress' | 'needs_review';
+  /**
+   * Status values for project-level thread tracking:
+   *   active     — currently being worked on this session
+   *   next_up    — highest priority, should be picked next
+   *   blocked    — waiting on something external
+   *   backlog    — future work, lower priority
+   */
+  status: 'active' | 'next_up' | 'blocked' | 'backlog';
   context: string;
 }
 
@@ -164,7 +171,7 @@ export function compressTranscript(transcript: string, sessionId: string): Memor
     } else if (lower.includes('todo') || lower.includes('blocked') || lower.includes('needs review')) {
       openThreads.push({
         topic: line.trim(),
-        status: lower.includes('blocked') ? 'blocked' : 'in_progress',
+        status: lower.includes('blocked') ? 'blocked' : 'active',
         context: 'Extracted from transcript',
       });
     } else if (lower.includes('created') || lower.includes('modified') || lower.includes('deleted')) {

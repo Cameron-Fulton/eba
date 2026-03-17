@@ -29,6 +29,7 @@ import { SOPEngine, createRefactoringSOP } from './phase2/sop';
 import { ThreePillarModel } from './phase3/three-pillar-model';
 import { EBAPipeline } from './pipeline/eba-pipeline';
 import { ShellTestRunner } from './utils/shell-test-runner';
+import { ProjectOrchestrator } from './pipeline/project-orchestrator';
 
 const ROOT_DIR      = path.resolve(__dirname, '..');
 const DOCS_DIR      = path.join(ROOT_DIR, 'docs');
@@ -86,6 +87,22 @@ if (SHELL_METACHARACTERS.test(testCommand)) {
     return true;
   });
 
+  // ModelRouter has `routine` (not `fast`) for cheap/fast tasks.
+  const routineProvider = router.routine ?? router.standard;
+
+  // --- Boot planning step: read PROJECT.md + latest memory packet, select next task ---
+  const projectOrchestrator = new ProjectOrchestrator({
+    docsDir:    DOCS_DIR,
+    packetsDir: PACKETS_DIR,
+    provider:   routineProvider,
+  });
+  const planning = await projectOrchestrator.planNextTask();
+  if (planning.chosenThread) {
+    console.log(`📋 Project mode: selected "${planning.chosenThread.topic}" from open threads`);
+  } else {
+    console.log('📋 Manual mode: using existing ACTIVE_TASK.md');
+  }
+
   // --- Validate active task ---
   const taskFile = path.join(DOCS_DIR, 'ACTIVE_TASK.md');
   if (!fs.existsSync(taskFile)) {
@@ -100,9 +117,6 @@ if (SHELL_METACHARACTERS.test(testCommand)) {
     timeoutMs: 120_000,
   });
 
-  // ModelRouter has `routine` (not `fast`) for cheap/fast tasks.
-  const routineProvider = router.routine ?? router.standard;
-
   const pipeline = new EBAPipeline({
     docsDir: DOCS_DIR,
     logsDir: LOGS_DIR,
@@ -116,6 +130,7 @@ if (SHELL_METACHARACTERS.test(testCommand)) {
     toolShed,
     threePillar,
     testRunner,
+    projectOrchestrator,
     approvalMode: 'dev',
   });
 

@@ -38,6 +38,8 @@ export { EBAPipeline } from './pipeline/eba-pipeline';
 export type { EBAPipelineConfig, PipelineResult } from './pipeline/eba-pipeline';
 export { PromptEnhancer } from './pipeline/prompt-enhancer';
 export type { PromptEnhancerConfig } from './pipeline/prompt-enhancer';
+export { ProjectOrchestrator } from './pipeline/project-orchestrator';
+export type { ProjectOrchestratorConfig, PlanningResult } from './pipeline/project-orchestrator';
 
 // Providers
 export { ClaudeProvider } from './providers/claude-provider';

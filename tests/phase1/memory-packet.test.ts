@@ -21,7 +21,7 @@ function createValidPacket(): MemoryPacket {
       { description: 'Tight deadline', severity: 'medium' },
     ],
     open_threads: [
-      { topic: 'Database choice', status: 'in_progress', context: 'Evaluating SQLite vs Postgres' },
+      { topic: 'Database choice', status: 'active', context: 'Evaluating SQLite vs Postgres' },
     ],
     key_file_changes: [
       { path: 'src/index.ts', action: 'created', summary: 'Entry point' },

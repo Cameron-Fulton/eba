@@ -43,7 +43,7 @@ OUTPUT FORMAT (respond with raw JSON only, no markdown fences):
     { "description": "Risk or concern surfaced", "severity": "low|medium|high|critical", "mitigation": "optional mitigation noted" }
   ],
   "open_threads": [
-    { "topic": "Incomplete item or blocker", "status": "blocked|in_progress|needs_review", "context": "Relevant context" }
+    { "topic": "Incomplete item or blocker", "status": "active|next_up|blocked|backlog", "context": "Relevant context" }
   ],
   "key_file_changes": [
     { "path": "relative/file/path", "action": "created|modified|deleted", "summary": "What changed and why" }
@@ -54,6 +54,8 @@ RULES:
 - Extract ALL decisions, even minor ones. Missing a decision is worse than including a trivial one.
 - Extract ALL rejected ideas explicitly. This prevents a fresh agent from re-proposing bad ideas.
 - Be specific in rationale fields — vague rationale is useless to a fresh agent.
+- For open_threads status: use 'active' for what is being worked on NOW, 'next_up' for the single most important next task, 'blocked' for items waiting on something external, 'backlog' for future lower-priority work.
+- Carry forward any open_threads from prior sessions that are still relevant — do not discard unfinished work.
 - If a field has no entries, return an empty array [].
 - Respond with raw JSON only. No explanation, no markdown.
 
