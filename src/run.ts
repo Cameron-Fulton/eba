@@ -43,10 +43,12 @@ async function main() {
   // --- Config from env ---
   const testCommand  = process.env.TEST_COMMAND ?? 'npm test';
 
-  const SHELL_METACHARACTERS = /[;&|$`\<>]/;
-  if (SHELL_METACHARACTERS.test(testCommand)) {
-    console.error(`❌ TEST_COMMAND contains disallowed shell metacharacters: "${testCommand}"`);
-    console.error('   Only safe commands are allowed (e.g. "npm test", "jest --runInBand").');
+  // Allowlist: only permit safe characters for a shell test command
+  const SAFE_COMMAND = /^[a-zA-Z0-9 _.\-\/=]+$/;
+  if (!SAFE_COMMAND.test(testCommand)) {
+    console.error(`❌ TEST_COMMAND contains disallowed characters: "${testCommand}"`);
+    console.error('   Only alphanumeric characters, spaces, hyphens, underscores, dots, slashes and = are allowed.');
+    console.error('   Example: "npm test" or "jest --runInBand"');
     process.exit(1);
   }
   const primaryModel = (process.env.PRIMARY_MODEL ?? 'claude') as 'claude' | 'gemini' | 'openai' | 'openrouter';
@@ -161,7 +163,7 @@ async function main() {
     }
     console.log(`🆔 Session id:      ${result.sessionId}`);
   } catch (err) {
-    console.error('\n❌ Pipeline error:', err);
+    console.error('\n❌ Pipeline error:', err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 }

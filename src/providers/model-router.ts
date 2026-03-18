@@ -133,7 +133,7 @@ export class ModelRouter {
       if (code === 'ENOENT') {
         console.warn('[ModelRouter] model-config.json not found, using defaults.');
       } else {
-        console.warn('[ModelRouter] Failed to read model-config.json, using defaults.', error);
+        console.warn('[ModelRouter] Failed to read model-config.json, using defaults.', error instanceof Error ? error.message : String(error));
       }
       return { ...DEFAULT_OPENROUTER_MODELS };
     }
@@ -147,7 +147,7 @@ export class ModelRouter {
         complex:  parsed.openrouter?.complex  ?? DEFAULT_OPENROUTER_MODELS.complex,
       };
     } catch (error) {
-      console.warn('[ModelRouter] model-config.json contains invalid JSON, using defaults.', error);
+      console.warn('[ModelRouter] model-config.json contains invalid JSON, using defaults.', error instanceof Error ? error.message : String(error));
       return { ...DEFAULT_OPENROUTER_MODELS };
     }
   }

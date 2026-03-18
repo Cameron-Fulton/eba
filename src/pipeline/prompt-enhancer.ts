@@ -70,7 +70,16 @@ export class PromptEnhancer implements LLMProvider {
     const failures = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
 
     if (failures.length > 0) {
-      const sanitize = (s: string) => s.replace(/^#{1,6} /gm, '').replace(/\*\*/g, '');
+      const sanitize = (s: string) => s
+        // Strip markdown headers that could create new prompt sections
+        .replace(/^#{1,6} /gm, '')
+        // Strip bold/italic markdown
+        .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')
+        // Strip lines that start with common prompt injection keywords
+        .replace(/^(ignore|disregard|forget|system|assistant|user|human|\[INST\]|<\/?s>).*/gim, '[filtered]')
+        // Truncate to reasonable max length per field
+        .slice(0, 500)
+        .trim();
       const failureLines = failures.map(f =>
         `- Scenario: ${sanitize(f.scenario)}\n  Failed approach: ${sanitize(f.attempt)}\n  Why it failed: ${sanitize(f.outcome)}\n  What works: ${sanitize(f.solution)}`
       );

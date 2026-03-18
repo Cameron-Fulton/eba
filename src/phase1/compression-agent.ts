@@ -89,7 +89,7 @@ export class CompressionAgent {
         .trim();
       parsed = JSON.parse(cleaned);
     } catch {
-      throw new Error(`CompressionAgent: LLM returned invalid JSON.\nRaw response:\n${raw}`);
+      throw new Error(`CompressionAgent: LLM returned invalid JSON. First 200 chars of response: ${raw.slice(0, 200)}`);
     }
 
     // Build the full packet, merging LLM output with metadata

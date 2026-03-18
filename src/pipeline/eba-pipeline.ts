@@ -212,8 +212,13 @@ export class EBAPipeline {
       if (consortiumApproved) {
         console.log('\n🗳️  Escalating to consortium voter for consensus...');
         try {
+          // Sanitize task content to prevent prompt injection into consortium
+          const sanitizedTask = activeTask
+            .replace(/^(ignore|disregard|forget|system|assistant|user|\[INST\]).*/gim, '[filtered]')
+            .slice(0, 2000);
+
           const consensusPrompt = [
-            `Task: ${activeTask}`,
+            `Task: ${sanitizedTask}`,
             'The primary model has failed multiple attempts. Provide a clear, concrete implementation plan.',
             'Be specific about what code to write and what approach to take.',
           ].join('\n');
@@ -233,7 +238,7 @@ export class EBAPipeline {
             console.log(`⚠️  Consortium could not reach quorum (confidence: ${(voteResult.confidence * 100).toFixed(0)}%)`);
           }
         } catch (err) {
-          console.warn('Consortium voter error (non-fatal):', err);
+          console.warn('Consortium voter error (non-fatal):', err instanceof Error ? err.message : String(err));
         }
       } else {
         console.warn('⛔ [3PM] Consortium escalation denied — skipping consensus vote');
@@ -295,7 +300,7 @@ export class EBAPipeline {
       console.log(`   Rejected ideas: ${packet.rejected_ideas.length}`);
       console.log(`   Open threads: ${packet.open_threads.length}`);
     } catch (err) {
-      console.warn('Session compression failed (non-fatal):', err);
+      console.warn('Session compression failed (non-fatal):', err instanceof Error ? err.message : String(err));
     }
 
     // 9. Trigger project orchestrator to load the next task (if project mode is active).
@@ -312,7 +317,7 @@ export class EBAPipeline {
           console.log('\n✅ All project threads complete');
         }
       } catch (err) {
-        console.warn('Project orchestrator error (non-fatal):', err);
+        console.warn('Project orchestrator error (non-fatal):', err instanceof Error ? err.message : String(err));
       }
     }
 
@@ -367,7 +372,7 @@ export class EBAPipeline {
         console.log(`  ✅ ${report.task} — ${report.status} (${report.checks.length} checks)`);
         markdown.push(report.markdown);
       } else {
-        console.warn('  ⚠️  Visual proof hook failed (non-fatal):', result.reason);
+        console.warn('  ⚠️  Visual proof hook failed (non-fatal):', result.reason instanceof Error ? result.reason.message : String(result.reason));
       }
     }
 
@@ -379,7 +384,7 @@ export class EBAPipeline {
         fs.writeFileSync(outputPath, markdown.join('\n\n---\n\n'), 'utf-8');
         console.log(`  📝 Proof report written: ${outputPath}`);
       } catch (err) {
-        console.warn('  ⚠️  Could not write visual proof report (non-fatal):', err);
+        console.warn('  ⚠️  Could not write visual proof report (non-fatal):', err instanceof Error ? err.message : String(err));
       }
     }
   }

@@ -72,7 +72,16 @@ export class ShellTestRunner implements TestRunner {
         {
           cwd:     this.config.cwd,
           timeout: timeoutMs,
-          env:     { ...process.env },
+          env: {
+            PATH:     process.env.PATH ?? '',
+            HOME:     process.env.HOME ?? '',
+            NODE_ENV: process.env.NODE_ENV ?? 'test',
+            // npm needs these to resolve binaries
+            npm_execpath:       process.env.npm_execpath,
+            npm_config_cache:   process.env.npm_config_cache,
+            FORCE_COLOR:        process.env.FORCE_COLOR,
+            CI:                 process.env.CI,
+          },
         },
         (error, stdout, stderr) => {
           const duration_ms = Date.now() - start;

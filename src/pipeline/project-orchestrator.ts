@@ -139,8 +139,14 @@ export class ProjectOrchestrator {
     if (nextUp.length === 1) return nextUp[0];
 
     // If multiple threads, use LLM to rank them
+    // Sanitize thread content to prevent prompt injection
+    const sanitizeField = (s: string) => s
+      .replace(/^(ignore|disregard|forget|system|assistant|user|\[INST\]).*/gim, '[filtered]')
+      .slice(0, 500)
+      .trim();
+
     const threadList = actionable
-      .map((t, i) => `[${i}] (${t.status}) ${t.topic}\n    Context: ${t.context}`)
+      .map((t, i) => `[${i}] (${t.status}) ${sanitizeField(t.topic)}\n    Context: ${sanitizeField(t.context)}`)
       .join('\n');
 
     const prompt = [
