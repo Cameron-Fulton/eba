@@ -82,8 +82,8 @@ Entry Points
 ## Open Items (prioritised)
 1. **Push to origin** — 2 commits ahead of origin/main, never pushed
 2. **Benchmark tests missing** — `src/benchmark/` (run-benchmark, sop-coverage, task-corpus) has no test coverage
-3. **Open handle warning** — `--forceExit` covers it but root cause unknown; AIIndex was ruled out
-4. **OpenRouter probe** — prior session found 2/4 tests passing; Nemotron reasoning tokens and generation lookup documented in `docs/kamakazi/` but not resolved
+3. **Open handle warning** — root cause confirmed: WSL2/libuv internal handle, undetectable by Jest --detectOpenHandles. --forceExit is the correct permanent fix. No further action needed.
+4. **OpenRouter probe** — unit tests all passing (8/8). Probe app fixed: updated deprecated PAID_MODEL to mistralai/mistral-small-3.1-24b-instruct and added 1500ms delay before generation lookup to handle eventual consistency.
 5. **`src/index.ts`** — public API barrel file; contents not reviewed
 
 ## How to Pick Up

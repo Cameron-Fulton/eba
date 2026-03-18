@@ -9,7 +9,7 @@ const PROMPT = "Reply with exactly: PROBE_OK";
 // Verified 2026-03-16 — review monthly; free-tier models rotate frequently on OpenRouter.
 const FREE_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 // Verified 2026-03-16 — review quarterly; paid models are more stable but can be deprecated.
-const PAID_MODEL = "mistralai/mistral-7b-instruct";
+const PAID_MODEL = "mistralai/mistral-small-3.1-24b-instruct";
 
 type ProbeResult = {
   ok: boolean;
@@ -141,6 +141,9 @@ async function chatCompletion(apiKey: string, model: string, prompt: string): Pr
     };
 
     if (generationId) {
+      // OpenRouter generation records are indexed asynchronously; brief delay improves lookup reliability.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
       const generation = await fetchJson(
         `${OPENROUTER_BASE_URL}/generation?id=${encodeURIComponent(generationId)}`,
         {
