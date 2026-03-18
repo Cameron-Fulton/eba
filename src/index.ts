@@ -7,6 +7,7 @@ export { CompressionAgent } from './phase1/compression-agent';
 export type { CompressionAgentConfig } from './phase1/compression-agent';
 export { BlueprintOrchestrator } from './phase1/orchestrator';
 export type { OrchestratorConfig, LLMProvider, TestRunner, TestResult, ExecutionLog } from './phase1/orchestrator';
+export { AIIndex } from './phase1/ai-index';
 
 // Phase 2: Execution Engine
 export { ThreadManager } from './phase2/thread-manager';

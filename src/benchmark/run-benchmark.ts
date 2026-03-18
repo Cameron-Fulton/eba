@@ -77,8 +77,10 @@ function main() {
     console.error(`Coverage score ${result.score.toFixed(3)} is below threshold ${COVERAGE_THRESHOLD}`);
     process.exit(1);
   }
-
-  process.exit(0);
 }
 
-main();
+export { main as runBenchmark };
+
+if (require.main === module) {
+  main();
+}
