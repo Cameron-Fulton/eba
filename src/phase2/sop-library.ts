@@ -242,3 +242,193 @@ export function createDeploymentSOP(): SOPDefinition {
     ],
   };
 }
+
+/** Database migration workflow with explicit approval before schema changes. */
+export function createDatabaseMigrationSOP(): SOPDefinition {
+  return {
+    id: 'database_migration',
+    name: 'Standard Database Migration Workflow',
+    description: 'Design, apply, and validate a database schema migration with safe rollback awareness',
+    initial_step: 'design',
+    steps: [
+      {
+        id: 'design',
+        name: 'Design Migration',
+        description: 'Define the schema changes, migration script, backfill strategy, and rollback plan',
+        allowed_tool_categories: ['read', 'search', 'analyze'],
+        next_steps: ['review'],
+      },
+      {
+        id: 'review',
+        name: 'Review Migration Plan',
+        description: 'Validate the migration script for correctness, safety, and reversibility',
+        allowed_tool_categories: ['read', 'analyze'],
+        next_steps: ['apply'],
+      },
+      {
+        id: 'apply',
+        name: 'Apply Migration',
+        description: 'Execute the migration script against the target database',
+        allowed_tool_categories: ['read', 'execute'],
+        next_steps: ['verify'],
+        requires_approval: true,
+      },
+      {
+        id: 'verify',
+        name: 'Verify Migration',
+        description: 'Run checks to confirm schema changes are correct and data integrity is preserved',
+        allowed_tool_categories: ['read', 'execute', 'analyze'],
+        next_steps: ['apply', 'complete'],
+      },
+      {
+        id: 'complete',
+        name: 'Complete',
+        description: 'Database migration is applied and verified',
+        allowed_tool_categories: ['read'],
+        next_steps: [],
+      },
+    ],
+  };
+}
+
+/** Documentation workflow for writing and publishing developer docs. */
+export function createDocumentationSOP(): SOPDefinition {
+  return {
+    id: 'documentation',
+    name: 'Standard Documentation Workflow',
+    description: 'Research, write, review, and publish developer documentation including onboarding guides and release checklists',
+    initial_step: 'research',
+    steps: [
+      {
+        id: 'research',
+        name: 'Research and Outline',
+        description: 'Gather context, identify audience, and create documentation outline',
+        allowed_tool_categories: ['read', 'search', 'analyze'],
+        next_steps: ['draft'],
+      },
+      {
+        id: 'draft',
+        name: 'Draft Documentation',
+        description: 'Write the documentation content including setup instructions, usage examples, and checklists',
+        allowed_tool_categories: ['read', 'write', 'search'],
+        next_steps: ['review'],
+      },
+      {
+        id: 'review',
+        name: 'Review and Refine',
+        description: 'Review for accuracy, completeness, and clarity; incorporate feedback',
+        allowed_tool_categories: ['read', 'write', 'analyze'],
+        next_steps: ['draft', 'publish'],
+      },
+      {
+        id: 'publish',
+        name: 'Publish Documentation',
+        description: 'Commit and publish the finalized documentation to the appropriate location',
+        allowed_tool_categories: ['read', 'write', 'execute'],
+        next_steps: ['complete'],
+      },
+      {
+        id: 'complete',
+        name: 'Complete',
+        description: 'Documentation is written, reviewed, and published',
+        allowed_tool_categories: ['read'],
+        next_steps: [],
+      },
+    ],
+  };
+}
+
+/** Security audit workflow for identifying and remediating vulnerabilities. */
+export function createSecurityAuditSOP(): SOPDefinition {
+  return {
+    id: 'security_audit',
+    name: 'Standard Security Audit Workflow',
+    description: 'Audit the codebase for security vulnerabilities including secrets handling, input validation, and injection risks',
+    initial_step: 'scope',
+    steps: [
+      {
+        id: 'scope',
+        name: 'Define Audit Scope',
+        description: 'Identify the components, threat surfaces, and security concerns to audit',
+        allowed_tool_categories: ['read', 'search', 'analyze'],
+        next_steps: ['audit'],
+      },
+      {
+        id: 'audit',
+        name: 'Run Security Audit',
+        description: 'Inspect code for vulnerabilities: secrets exposure, injection vectors, input validation gaps, and unsafe patterns',
+        allowed_tool_categories: ['read', 'search', 'analyze', 'execute'],
+        next_steps: ['report'],
+      },
+      {
+        id: 'report',
+        name: 'Produce Security Report',
+        description: 'Document findings with severity ratings, affected components, and recommended remediations',
+        allowed_tool_categories: ['read', 'write', 'analyze'],
+        next_steps: ['remediate', 'complete'],
+      },
+      {
+        id: 'remediate',
+        name: 'Remediate Findings',
+        description: 'Apply fixes for identified vulnerabilities and verify remediations are effective',
+        allowed_tool_categories: ['read', 'write', 'execute'],
+        next_steps: ['audit', 'complete'],
+        requires_approval: true,
+      },
+      {
+        id: 'complete',
+        name: 'Complete',
+        description: 'Security audit is finished and findings are documented or remediated',
+        allowed_tool_categories: ['read'],
+        next_steps: [],
+      },
+    ],
+  };
+}
+
+/** Performance optimization workflow for profiling and improving system performance. */
+export function createPerformanceOptimizationSOP(): SOPDefinition {
+  return {
+    id: 'performance_optimization',
+    name: 'Standard Performance Optimization Workflow',
+    description: 'Profile the system to identify bottlenecks, implement targeted optimizations, and validate latency and throughput improvements',
+    initial_step: 'profile',
+    steps: [
+      {
+        id: 'profile',
+        name: 'Profile and Measure',
+        description: 'Measure current performance baselines and identify bottlenecks using profiling tools',
+        allowed_tool_categories: ['read', 'execute', 'analyze'],
+        next_steps: ['analyze'],
+      },
+      {
+        id: 'analyze',
+        name: 'Analyze Bottlenecks',
+        description: 'Identify root causes of performance issues including slow queries, memory pressure, and inefficient algorithms',
+        allowed_tool_categories: ['read', 'search', 'analyze'],
+        next_steps: ['optimize'],
+      },
+      {
+        id: 'optimize',
+        name: 'Implement Optimizations',
+        description: 'Apply targeted code changes to reduce latency, improve throughput, and eliminate bottlenecks',
+        allowed_tool_categories: ['read', 'write', 'search'],
+        next_steps: ['validate'],
+      },
+      {
+        id: 'validate',
+        name: 'Validate Improvements',
+        description: 'Re-run performance measurements to confirm improvements and check for regressions',
+        allowed_tool_categories: ['read', 'execute', 'analyze'],
+        next_steps: ['optimize', 'complete'],
+      },
+      {
+        id: 'complete',
+        name: 'Complete',
+        description: 'Performance optimizations are implemented and validated',
+        allowed_tool_categories: ['read'],
+        next_steps: [],
+      },
+    ],
+  };
+}

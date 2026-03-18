@@ -57,4 +57,9 @@ export type { ModelRouterConfig, TaskComplexity } from './providers/model-router
 // Utilities
 export { ShellTestRunner } from './utils/shell-test-runner';
 export type { ShellTestRunnerConfig } from './utils/shell-test-runner';
+export { retryWithBackoff } from './utils/shell-test-runner';
+export type { RetryWithBackoffOptions } from './utils/shell-test-runner';
 export { tokenCount } from './utils/token-counter';
+
+// Scheduler
+export { startBenchmarkScheduler } from './scheduler';

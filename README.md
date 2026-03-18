@@ -268,7 +268,7 @@ Run integration tests only:
 npx jest tests/pipeline/eba-pipeline.integration.test.ts
 ```
 
-Coverage scope includes all four architecture phases plus pipeline/provider utilities, with an integration suite validating end-to-end phase composition (targeted as **22 unit test files across all 4 phases + 1 integration suite**).
+Coverage scope includes all four architecture phases plus pipeline/provider utilities, with integration and benchmark coverage validating end-to-end phase composition (targeted as **22 unit test files across all 4 phases + 1 integration suite + 1 benchmark suite**).
 
 ---
 

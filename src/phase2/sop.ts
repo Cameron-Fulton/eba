@@ -113,7 +113,7 @@ export function createRefactoringSOP(): SOPDefinition {
   return {
     id: 'refactoring',
     name: 'Standard Refactoring Workflow',
-    description: 'Safe refactoring with analysis before modification',
+    description: 'Refactor existing code into smaller, cleaner functions to improve clarity and maintainability without changing behavior, then verify tests still pass',
     initial_step: 'analyze',
     steps: [
       {

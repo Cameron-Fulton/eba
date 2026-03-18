@@ -12,6 +12,10 @@ import {
   createCodeReviewSOP,
   createDependencyUpgradeSOP,
   createDeploymentSOP,
+  createDatabaseMigrationSOP,
+  createDocumentationSOP,
+  createSecurityAuditSOP,
+  createPerformanceOptimizationSOP,
 } from '../phase2/sop-library';
 import { SOPCoverageBenchmark } from './sop-coverage';
 import { STANDARD_TASK_CORPUS } from './task-corpus';
@@ -31,6 +35,10 @@ function main() {
     createCodeReviewSOP(),
     createDependencyUpgradeSOP(),
     createDeploymentSOP(),
+    createDatabaseMigrationSOP(),
+    createDocumentationSOP(),
+    createSecurityAuditSOP(),
+    createPerformanceOptimizationSOP(),
   ];
 
   for (const sop of availableSops) {
