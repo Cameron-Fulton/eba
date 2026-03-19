@@ -10,11 +10,12 @@ An autonomous AI engineering system with episodic memory, thread isolation, mult
 - Always run tests via `npm test` or `node_modules/.bin/jest --runInBand --forceExit`
 - Node v22.22.1, Jest 29.7.0, TypeScript 5.3.3
 
-## Current State (commit 7e0b280, current HEAD)
+## Current State (commit e53c0ce, current HEAD)
 - **Branch:** main (synced with origin/main)
 - **Tests:** 22 suites, 195 tests — all passing, exit 0
+- **Benchmark:** 1.000 (10/10 SOP coverage — all task types covered)
 - **npm audit:** 0 vulnerabilities
-- **Active task:** None — ready for next assignment
+- **Active task:** Implement tool-calling loop (see ACTIVE_TASK.md)
 
 ## What Was Done This Session
 
@@ -80,18 +81,17 @@ Entry Points
 ```
 
 ## Open Items (prioritised)
-1. **Push to origin** — 2 commits ahead of origin/main, never pushed
-2. **Benchmark tests missing** — `src/benchmark/` (run-benchmark, sop-coverage, task-corpus) has no test coverage
-3. **Open handle warning** — root cause confirmed: WSL2/libuv internal handle, undetectable by Jest --detectOpenHandles. --forceExit is the correct permanent fix. No further action needed.
-4. **OpenRouter probe** — unit tests all passing (8/8). Probe app fixed: updated deprecated PAID_MODEL to mistralai/mistral-small-3.1-24b-instruct and added 1500ms delay before generation lookup to handle eventual consistency.
-5. **`src/index.ts`** — public API barrel file; contents not reviewed
+1. **Tool-calling loop** — THE critical missing piece. LLM generates text but cannot apply changes. See ACTIVE_TASK.md for full spec.
+2. **Tool executors** — ToolShed has schemas but no executor functions. Need read/write/search/execute implementations.
+3. **Provider tool-use API** — LLMProvider interface needs callWithTools(). Start with ClaudeProvider using Anthropic tool_use.
+4. **3PM gating on tool execution** — ThreePillarModel must sit in the tool execution path, not just the orchestrator retry path.
 
 ## How to Pick Up
 ```bash
 cd /mnt/d/projects/eba
 npm test                     # verify 195 tests still green
 cat docs/ACTIVE_TASK.md      # check for assigned work
-git log --oneline -5         # confirm state
+git log --oneline -5  # HEAD should be e53c0ce
 ```
 
 ## Key Commands

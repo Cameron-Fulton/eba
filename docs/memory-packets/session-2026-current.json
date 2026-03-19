@@ -1,0 +1,72 @@
+{
+  "id": "session_2026-current_manual",
+  "created_at": "2026-07-14T00:00:00.000Z",
+  "session_summary": "Multi-session block covering: verification of retryWithBackoff implementation, committing 7 unstaged security hardening files, investigating and closing open handle warning (confirmed WSL2/libuv, undetectable by Jest), fixing OpenRouter probe app (deprecated model + generation lookup delay), adding AIIndex to public API, refactoring run-benchmark.ts for testability + 5 new tests, adding 4 new SOPs (database migration, documentation, security audit, performance optimization), fixing refactoring SOP description, completing public API exports (retryWithBackoff, RetryWithBackoffOptions, startBenchmarkScheduler), and updating all docs. Benchmark score improved from 0.600 to 1.000 (10/10). Discovered the critical missing piece: the tool-calling loop. The LLM inside BlueprintOrchestrator receives a task and returns text, but has no mechanism to actually apply changes to the codebase. The Tool Shed defines tool schemas but they are not wired into an LLM function-calling loop.",
+  "key_decisions": [
+    {
+      "decision": "Leave memory packets in JSON format, not Markdown",
+      "rationale": "Packets are consumed by code, not injected raw into model prompts. If raw injection is needed in future, implement a toMarkdown() method to derive Markdown on demand rather than storing both formats.",
+      "outcome": "No format change needed"
+    },
+    {
+      "decision": "The critical next workstream is the tool-calling loop inside BlueprintOrchestrator",
+      "rationale": "The entire EBA chassis (memory, SOPs, threading, safety, retry, compression) is built. But the LLM inside the orchestrator only generates text responses — it cannot call tools to read files, write code, or run commands. Without this, the system cannot autonomously complete a coding project.",
+      "outcome": "Next session must implement the tool-calling loop"
+    }
+  ],
+  "rejected_ideas": [
+    {
+      "idea": "Store memory packets in both JSON and Markdown",
+      "reason": "Adds sync complexity with no current payoff. Packets are consumed by code, not injected into prompts directly."
+    }
+  ],
+  "risks": [
+    {
+      "description": "Tool-calling loop requires the LLM provider to support function/tool calling API (Claude tool_use, OpenAI function_calling, Gemini function declarations). Each provider needs its own tool-call handling.",
+      "severity": "medium",
+      "mitigation": "Start with Claude provider which has well-documented tool_use API. Abstract the tool-call interface so other providers can be added incrementally."
+    },
+    {
+      "description": "Tool execution (writing files, running shell commands) is a high-risk operation. The Three-Pillar Model approval gates must be wired into the tool execution path.",
+      "severity": "high",
+      "mitigation": "Route all tool executions through ThreePillarModel.classifyAction() before executing. High-risk actions (write, execute) must pass approval check."
+    }
+  ],
+  "open_threads": [
+    {
+      "topic": "Implement tool-calling loop in BlueprintOrchestrator",
+      "status": "not_started",
+      "context": "The orchestrator currently calls provider.call(prompt) and gets back a string. It needs to be refactored to: (1) pass ToolShed schemas to the LLM as function definitions, (2) handle tool_call responses in a loop, (3) execute tool calls against the real filesystem/terminal, (4) feed results back to the LLM, (5) repeat until the model signals completion or tests pass. This is the agentic loop that makes EBA actually autonomous."
+    },
+    {
+      "topic": "Implement concrete tool executors for the Tool Shed",
+      "status": "not_started",
+      "context": "Tool Shed currently stores schemas and metadata. Need actual executor functions for each tool category: read (fs.readFileSync), write (fs.writeFileSync), search (grep/ripgrep), execute (child_process.exec via ShellTestRunner), analyze (pass-through to LLM). These executors are called by the tool-calling loop when the model invokes a tool."
+    },
+    {
+      "topic": "Wire tool execution through 3PM approval gates",
+      "status": "not_started",
+      "context": "Before executing any tool call, the action must be classified by ThreePillarModel.classifyAction(). Write and execute tools are high-risk and may require approval depending on approvalMode setting."
+    },
+    {
+      "topic": "Update provider interfaces to support tool/function calling",
+      "status": "not_started",
+      "context": "LLMProvider interface currently only has call(prompt: string): Promise<string>. Needs extension: callWithTools(prompt, tools, messages): Promise<TextResponse | ToolCallResponse>. Start with ClaudeProvider using Anthropic tool_use API."
+    }
+  ],
+  "project_state": {
+    "test_suites": 22,
+    "tests_passing": 195,
+    "tests_failing": 0,
+    "benchmark_score": "1.000 (10/10 SOP coverage)",
+    "npm_audit_vulnerabilities": 0,
+    "active_task": "Implement tool-calling loop — the agentic execution engine",
+    "git_head": "e53c0ce",
+    "branch": "main",
+    "commits_ahead_of_origin": 0
+  },
+  "metadata": {
+    "compression_ratio": 3.1,
+    "environment": "WSL2 on Windows NTFS /mnt/d/projects/eba, Node v22.22.1, Jest 29.7.0, ts-jest 29.1.2, TypeScript 5.3.3"
+  }
+}
