@@ -4,6 +4,10 @@
  * Lightweight Tool Selector picks only the 2-3 relevant tools per task.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { execSync } from 'child_process';
+
 export interface ToolSchema {
   name: string;
   description: string;
@@ -17,6 +21,12 @@ export interface ToolParameter {
   type: string;
   required: boolean;
   description: string;
+}
+
+export interface ToolExecutionResult {
+  success: boolean;
+  output: string;
+  error?: string;
 }
 
 export class ToolShed {
@@ -86,6 +96,77 @@ export class ToolShed {
       .sort((a, b) => b.score - a.score)
       .slice(0, maxTools)
       .map(s => s.tool);
+  }
+
+  execute(toolName: string, params: Record<string, unknown>, cwd?: string): ToolExecutionResult {
+    try {
+      switch (toolName) {
+        case 'file_read': {
+          const filePath = params['path'] as string;
+          const content = fs.readFileSync(filePath, 'utf-8');
+          return { success: true, output: content };
+        }
+        case 'file_write': {
+          const filePath = params['path'] as string;
+          const content = params['content'] as string;
+          const dir = path.dirname(filePath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(filePath, content, 'utf-8');
+          return { success: true, output: `Written to ${filePath}` };
+        }
+        case 'file_edit': {
+          const filePath = params['path'] as string;
+          const oldText = params['old_text'] as string;
+          const newText = params['new_text'] as string;
+          const existing = fs.readFileSync(filePath, 'utf-8');
+          if (!existing.includes(oldText)) {
+            return { success: false, output: '', error: `old_text not found in ${filePath}` };
+          }
+          fs.writeFileSync(filePath, existing.replace(oldText, newText), 'utf-8');
+          return { success: true, output: `Edited ${filePath}` };
+        }
+        case 'bash_execute': {
+          const command = params['command'] as string;
+          const output = execSync(command, { cwd, encoding: 'utf-8', timeout: 30000 });
+          return { success: true, output };
+        }
+        case 'test_runner': {
+          const filter = params['filter'] as string | undefined;
+          const cmd = filter
+            ? `npx jest --testNamePattern="${filter}" --runInBand --forceExit`
+            : 'npx jest --runInBand --forceExit';
+          const out = execSync(cmd, { cwd: cwd ?? process.cwd(), encoding: 'utf-8', timeout: 120000 });
+          return { success: true, output: out };
+        }
+        case 'grep_search': {
+          const pattern = params['pattern'] as string;
+          const searchPath = (params['path'] as string | undefined) ?? '.';
+          const escaped = pattern.replace(/"/g, '\\"');
+          const out = execSync(
+            `grep -r --include="*.ts" -n "${escaped}" "${searchPath}" 2>/dev/null || true`,
+            { cwd, encoding: 'utf-8' },
+          );
+          return { success: true, output: out || '(no matches)' };
+        }
+        case 'glob_find': {
+          const pattern = params['pattern'] as string;
+          const out = execSync(`find . -name "${pattern}" 2>/dev/null || true`, {
+            cwd,
+            encoding: 'utf-8',
+          });
+          return { success: true, output: out || '(no matches)' };
+        }
+        case 'code_analyzer': {
+          const analyzePath = params['path'] as string;
+          return { success: true, output: `Analysis target: ${analyzePath}` };
+        }
+        default:
+          return { success: false, output: '', error: `Unknown tool: ${toolName}` };
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, output: '', error };
+    }
   }
 }
 
