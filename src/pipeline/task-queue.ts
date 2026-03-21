@@ -1,6 +1,20 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
 
+interface TaskRow {
+  id: string;
+  priority: number;
+  status: string;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  task_json: string;
+  result_json: string | null;
+  sop_id: string | null;
+  depends_on: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TaskSpec {
   task: string;
   sopId?: string;
@@ -75,24 +89,33 @@ export class TaskQueue {
     return id;
   }
 
+  /**
+   * Claim the next available pending task.
+   * Wrapped in BEGIN IMMEDIATE to acquire a RESERVED lock before the SELECT
+   * runs, ensuring cross-process safety under WAL mode — two processes cannot
+   * both pass the SELECT and claim the same row simultaneously.
+   */
   claim(agentId: string): ClaimedTask | null {
     const now = new Date().toISOString();
-    const row = this.db.prepare(`
-      UPDATE tasks
-      SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
-      WHERE id = (
-        SELECT t.id FROM tasks t
-        WHERE t.status = 'pending'
-          AND (t.depends_on IS NULL OR NOT EXISTS (
-            SELECT 1 FROM json_each(t.depends_on) AS dep
-            JOIN tasks AS prereq ON prereq.id = dep.value
-            WHERE prereq.status != 'completed'
-          ))
-        ORDER BY t.priority DESC, t.created_at ASC
-        LIMIT 1
-      )
-      RETURNING *
-    `).get(agentId, now, now) as any;
+    const claimTxn = this.db.transaction(() => {
+      return this.db.prepare(`
+        UPDATE tasks
+        SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
+        WHERE id = (
+          SELECT t.id FROM tasks t
+          WHERE t.status = 'pending'
+            AND (t.depends_on IS NULL OR NOT EXISTS (
+              SELECT 1 FROM json_each(t.depends_on) AS dep
+              JOIN tasks AS prereq ON prereq.id = dep.value
+              WHERE prereq.status != 'completed'
+            ))
+          ORDER BY t.priority DESC, t.created_at ASC
+          LIMIT 1
+        )
+        RETURNING *
+      `).get(agentId, now, now);
+    });
+    const row = claimTxn.immediate() as TaskRow | undefined;
 
     if (!row) return null;
 
@@ -101,7 +124,7 @@ export class TaskQueue {
       task: row.task_json,
       sopId: row.sop_id,
       priority: row.priority,
-      claimedAt: row.claimed_at,
+      claimedAt: row.claimed_at!, // always set by the UPDATE above
     };
   }
 
