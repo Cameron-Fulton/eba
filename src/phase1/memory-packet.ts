@@ -4,6 +4,8 @@
  * Achieves high information density at a fraction of the original transcript size.
  */
 
+import { randomUUID } from 'crypto';
+
 export interface MemoryPacket {
   id: string;
   timestamp: string;
@@ -51,6 +53,7 @@ export interface OpenThread {
   /** Optional detail describing why this thread is blocked. */
   blocked_reason?: string;
 }
+
 export interface FileChange {
   path: string;
   action: 'created' | 'modified' | 'deleted';
@@ -228,7 +231,7 @@ export function compressTranscript(transcript: string, sessionId: string): Memor
   const compressedTokens = Math.ceil(compressedContent.length / 4);
 
   return {
-    id: `pkt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+    id: `pkt_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`,
     timestamp: new Date().toISOString(),
     session_id: sessionId,
     decisions,
