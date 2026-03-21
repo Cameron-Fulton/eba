@@ -85,6 +85,10 @@ export interface EBAPipelineConfig {
   projectOrchestrator?: ProjectOrchestrator;
   /** Thread manager config (default: timeout_ms=120000, max_concurrent=1) */
   threadManagerConfig?: { timeout_ms: number; max_concurrent: number; maxEpisodeHistory?: number };
+  /** Override path for the active task file. Defaults to docs/ACTIVE_TASK.md. */
+  activeTaskPath?: string;
+  /** Directory for pending merge packets. When set, pipeline writes result packets here. */
+  pendingMergeDir?: string;
 }
 
 export interface PipelineResult {
@@ -118,7 +122,8 @@ export class EBAPipeline {
     const initialStep = this.config.sop.start(this.config.sopId);
     console.log(`📋 SOP started: ${initialStep.name}`);
 
-    const activeTaskPath = path.join(this.config.docsDir, 'ACTIVE_TASK.md');
+    const activeTaskPath = this.config.activeTaskPath
+      ?? path.join(this.config.docsDir, 'ACTIVE_TASK.md');
     const activeTask = fs.existsSync(activeTaskPath)
       ? fs.readFileSync(activeTaskPath, 'utf-8').trim()
       : null;
@@ -294,6 +299,18 @@ export class EBAPipeline {
       packetPath = path.join(this.config.packetsDir, filename);
       fs.writeFileSync(packetPath, JSON.stringify(packet, null, 2), 'utf-8');
 
+      // Write to pending_merge/ for merge agent if configured
+      if (this.config.pendingMergeDir) {
+        try {
+          fs.mkdirSync(this.config.pendingMergeDir, { recursive: true });
+          const pendingPath = path.join(this.config.pendingMergeDir, `${this.sessionId}.json`);
+          fs.writeFileSync(pendingPath, JSON.stringify(packet, null, 2), 'utf-8');
+          console.log(`📤 Pending merge packet: ${pendingPath}`);
+        } catch (err) {
+          console.warn('Pending merge write failed (non-fatal):', err instanceof Error ? err.message : String(err));
+        }
+      }
+
       console.log(`📦 Memory packet saved: ${filename}`);
       console.log(`   Compression ratio: ${packet.metadata.compression_ratio.toFixed(1)}:1`);
       console.log(`   Decisions captured: ${packet.decisions.length}`);
@@ -303,11 +320,19 @@ export class EBAPipeline {
       console.warn('Session compression failed (non-fatal):', err instanceof Error ? err.message : String(err));
     }
 
-    // 9. Trigger project orchestrator to load the next task (if project mode is active).
+    // 9. Trigger project orchestrator updates (if project mode is active).
     //    Runs outside the compression block so it fires even if compression failed —
     //    the orchestrator reads from disk and is not dependent on the in-memory packet.
     if (this.config.projectOrchestrator) {
       try {
+        if (!succeeded) {
+          const lastError = lastLog?.test_result.output?.trim() || 'No error output available';
+          await this.config.projectOrchestrator.markCurrentTaskBlocked(
+            activeTask,
+            `All attempts exhausted: ${lastError.slice(0, 500)}`
+          );
+        }
+
         const planning = await this.config.projectOrchestrator.planNextTask();
         if (planning.chosenThread) {
           console.log(`\n🗂️  Next task queued: ${planning.chosenThread.topic}`);
@@ -320,7 +345,6 @@ export class EBAPipeline {
         console.warn('Project orchestrator error (non-fatal):', err instanceof Error ? err.message : String(err));
       }
     }
-
     // Log final state via 3PM
     this.config.threePillar.logStateChange(
       'pipeline',
