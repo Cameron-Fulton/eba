@@ -1,4 +1,7 @@
-import { mergePackets } from '../../src/pipeline/merge-agent';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { mergePackets, MergeAgent } from '../../src/pipeline/merge-agent';
 import { MemoryPacket } from '../../src/phase1/memory-packet';
 
 function makePacket(overrides: Partial<MemoryPacket> = {}): MemoryPacket {
@@ -222,6 +225,63 @@ describe('mergePackets', () => {
     const empty = makePacket();
     const merged = mergePackets([full, empty]);
     expect(merged.rejected_ideas).toHaveLength(1);
+    expect(merged.entities).toHaveLength(1);
+    expect(merged.vocabulary).toHaveLength(1);
+  });
+});
+
+function writePacketFile(dir: string, packet: MemoryPacket, filename: string): void {
+  fs.writeFileSync(path.join(dir, filename), JSON.stringify(packet, null, 2));
+}
+
+describe('MergeAgent.sweep()', () => {
+  let pendingDir: string;
+  let packetsDir: string;
+  let agent: MergeAgent;
+
+  beforeEach(() => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eba-merge-'));
+    pendingDir = path.join(tmpDir, 'pending_merge');
+    packetsDir = path.join(tmpDir, 'memory-packets');
+    fs.mkdirSync(pendingDir, { recursive: true });
+    fs.mkdirSync(packetsDir, { recursive: true });
+    agent = new MergeAgent({ pendingDir, packetsDir });
+  });
+
+  test('returns merged:false when no pending files', async () => {
+    const result = await agent.sweep();
+    expect(result.merged).toBe(false);
+    expect(result.packetCount).toBe(0);
+  });
+
+  test('merges pending packets and moves to processed/', async () => {
+    const pkt = makePacket({
+      rejected_ideas: [{ idea: 'Test idea', reason: 'Test reason' }],
+    });
+    writePacketFile(pendingDir, pkt, 'task_001.json');
+    const result = await agent.sweep();
+    expect(result.merged).toBe(true);
+    expect(result.packetCount).toBe(1);
+    expect(result.outputPath).not.toBeNull();
+    expect(fs.existsSync(path.join(pendingDir, 'task_001.json'))).toBe(false);
+    expect(fs.existsSync(path.join(pendingDir, 'processed', 'task_001.json'))).toBe(true);
+    expect(fs.existsSync(result.outputPath!)).toBe(true);
+  });
+
+  test('preserves never-drop fields across multiple packets', async () => {
+    const pkt1 = makePacket({
+      rejected_ideas: [{ idea: 'Idea A', reason: 'Reason A' }],
+      entities: [{ name: 'Entity1', relationship: 'ref', urls: [], also: [] }],
+    });
+    const pkt2 = makePacket({
+      rejected_ideas: [{ idea: 'Idea B', reason: 'Reason B' }],
+      vocabulary: [{ term: 'Term1', definition: 'Def1' }],
+    });
+    writePacketFile(pendingDir, pkt1, 'task_001.json');
+    writePacketFile(pendingDir, pkt2, 'task_002.json');
+    const result = await agent.sweep();
+    const merged = JSON.parse(fs.readFileSync(result.outputPath!, 'utf-8'));
+    expect(merged.rejected_ideas).toHaveLength(2);
     expect(merged.entities).toHaveLength(1);
     expect(merged.vocabulary).toHaveLength(1);
   });

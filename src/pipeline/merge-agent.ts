@@ -4,10 +4,15 @@
  * Implements 10 merge rules with 3 never-drop fields.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import * as lockfile from 'proper-lockfile';
 import { randomUUID } from 'crypto';
 import {
   MemoryPacket, Entity, VocabularyEntry, SessionMeta,
+  deserializePacket, serializePacket,
 } from '../phase1/memory-packet';
+import { LLMProvider } from '../phase1/orchestrator';
 
 function normalizeForDedup(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -218,4 +223,106 @@ export function mergePackets(packets: MemoryPacket[]): MemoryPacket {
   }
 
   return merged;
+}
+
+export interface MergeAgentConfig {
+  pendingDir: string;
+  packetsDir: string;
+  maxVocabTokens?: number;
+  summaryTokenLimit?: number;
+  routineProvider?: LLMProvider;
+}
+
+export interface MergeResult {
+  merged: boolean;
+  packetCount: number;
+  outputPath: string | null;
+  errors: string[];
+}
+
+export class MergeAgent {
+  private config: MergeAgentConfig;
+
+  constructor(config: MergeAgentConfig) {
+    this.config = config;
+  }
+
+  async sweep(): Promise<MergeResult> {
+    const { pendingDir, packetsDir } = this.config;
+    const errors: string[] = [];
+
+    fs.mkdirSync(pendingDir, { recursive: true });
+    fs.mkdirSync(packetsDir, { recursive: true });
+
+    // Acquire lockfile (non-blocking — skip if held by another process)
+    const lockTarget = path.join(pendingDir, '.lock');
+    fs.writeFileSync(lockTarget, '', { flag: 'a' }); // ensure lock target exists
+    let releaseLock: (() => Promise<void>) | null = null;
+    try {
+      releaseLock = await lockfile.lock(lockTarget, { stale: 30_000, retries: 0 });
+    } catch {
+      return { merged: false, packetCount: 0, outputPath: null, errors: [] };
+    }
+
+    try {
+      // Read pending .json files (skip .lock and processed/)
+      const files = fs.readdirSync(pendingDir)
+        .filter(f => f.endsWith('.json'));
+      if (files.length === 0) {
+        return { merged: false, packetCount: 0, outputPath: null, errors: [] };
+      }
+
+      // Deserialize packets
+      const newPackets: MemoryPacket[] = [];
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(pendingDir, file), 'utf-8');
+          newPackets.push(deserializePacket(content));
+        } catch (err) {
+          errors.push(`Skipped invalid file ${file}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (newPackets.length === 0) {
+        return { merged: false, packetCount: 0, outputPath: null, errors };
+      }
+
+      // Load master packet if exists
+      const existingFiles = fs.existsSync(packetsDir)
+        ? fs.readdirSync(packetsDir)
+            .filter(f => f.endsWith('.json'))
+            .map(f => ({ name: f, mtime: fs.statSync(path.join(packetsDir, f)).mtimeMs }))
+            .sort((a, b) => b.mtime - a.mtime)
+        : [];
+
+      const allPackets: MemoryPacket[] = [];
+      if (existingFiles.length > 0) {
+        try {
+          const masterContent = fs.readFileSync(path.join(packetsDir, existingFiles[0].name), 'utf-8');
+          allPackets.push(deserializePacket(masterContent));
+        } catch { /* No valid master — start fresh */ }
+      }
+      allPackets.push(...newPackets);
+
+      // Merge using the pure function
+      const mergedPacket = mergePackets(allPackets);
+
+      // Write merged packet
+      const outputFilename = `${mergedPacket.session_id}_merged.json`;
+      const outputPath = path.join(packetsDir, outputFilename);
+      fs.writeFileSync(outputPath, serializePacket(mergedPacket), 'utf-8');
+
+      // Move processed files to processed/
+      const processedDir = path.join(pendingDir, 'processed');
+      fs.mkdirSync(processedDir, { recursive: true });
+      for (const file of files) {
+        const src = path.join(pendingDir, file);
+        const dst = path.join(processedDir, file);
+        if (fs.existsSync(src)) fs.renameSync(src, dst);
+      }
+
+      return { merged: true, packetCount: newPackets.length, outputPath, errors };
+    } finally {
+      if (releaseLock) await releaseLock();
+    }
+  }
 }
