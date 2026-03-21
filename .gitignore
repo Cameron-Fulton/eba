@@ -14,3 +14,10 @@ docs/solutions/
 
 # SQLite index
 .ai_index/
+
+# Multi-agent runtime data
+data/task-queue.db
+data/task-queue.db-wal
+data/task-queue.db-shm
+docs/pending_merge/
+docs/ACTIVE_TASK_agent_*.md

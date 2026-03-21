@@ -1,6 +1,6 @@
 // Phase 1: Foundation
 export { compressTranscript, serializePacket, deserializePacket, validateMemoryPacket } from './phase1/memory-packet';
-export type { MemoryPacket, Decision, FileChange, OpenThread, PacketMetadata, RejectedIdea, Risk } from './phase1/memory-packet';
+export type { MemoryPacket, Decision, FileChange, OpenThread, PacketMetadata, RejectedIdea, Risk, Entity, VocabularyEntry, SessionMeta } from './phase1/memory-packet';
 export { NegativeKnowledgeStore } from './phase1/negative-knowledge';
 export type { NegativeKnowledgeEntry } from './phase1/negative-knowledge';
 export { CompressionAgent } from './phase1/compression-agent';
@@ -41,6 +41,10 @@ export { PromptEnhancer } from './pipeline/prompt-enhancer';
 export type { PromptEnhancerConfig } from './pipeline/prompt-enhancer';
 export { ProjectOrchestrator } from './pipeline/project-orchestrator';
 export type { ProjectOrchestratorConfig, PlanningResult } from './pipeline/project-orchestrator';
+export { TaskQueue } from './pipeline/task-queue';
+export type { TaskSpec, ClaimedTask, TaskResult, QueueStats } from './pipeline/task-queue';
+export { MergeAgent, mergePackets } from './pipeline/merge-agent';
+export type { MergeAgentConfig, MergeResult } from './pipeline/merge-agent';
 
 // Providers
 export { ClaudeProvider } from './providers/claude-provider';
