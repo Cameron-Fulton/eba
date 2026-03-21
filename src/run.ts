@@ -249,11 +249,9 @@ async function main() {
     // Seed queue from open threads if queue is empty
     const stats = queue.peek();
     if (stats.pending === 0 && stats.claimed === 0) {
-      const queuePlanning = await projectOrchestrator.planNextTask();
-      // If there are actionable threads, we'd enqueue them here
-      // (Task 7 adds enqueueFromThreads — for now just log)
-      if (queuePlanning.openThreads.length > 0) {
-        console.log(`📋 ${queuePlanning.openThreads.length} open thread(s) available for future queue seeding`);
+      const seeded = projectOrchestrator.enqueueFromThreads(queue);
+      if (seeded > 0) {
+        console.log(`📥 Seeded ${seeded} task(s) from open threads`);
       }
     }
 
