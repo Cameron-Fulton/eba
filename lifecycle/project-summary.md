@@ -34,6 +34,8 @@ EBA is an autonomous AI engineering system that combines deterministic orchestra
 
 **Integration layer:** `EBAPipeline` connects all four phases. `PromptEnhancer` injects SOP/tools/NK context and forwards `callWithTools`. `ProjectOrchestrator` handles task planning from PROJECT.md.
 
+**Multi-Agent layer (new):** `TaskQueue` (SQLite WAL, atomic claim/release, `depends_on`), per-agent `ACTIVE_TASK_{agentId}.md` isolation, `MergeAgent` (pure `mergePackets()` with 10 rules + async `sweep()` with lockfile). Activated via `EBA_MULTI_AGENT=true`.
+
 ## Directory Layout
 
 ```
@@ -246,12 +248,12 @@ gantt
 
     section Multi-Agent Architecture
     MemoryPacket v2 Schema             :done, ma1, 2026-03-21, 1d
-    SQLite Task Queue                  :active, ma2, 2026-03-21, 1d
-    Merge Agent (pure + sweep)         :ma3, after ma2, 1d
-    Pipeline Integration               :ma4, after ma3, 1d
-    run.ts Multi-Agent Loop            :ma5, after ma4, 1d
-    Orchestrator Queue Seeding         :ma6, after ma5, 1d
-    Exports and Final Integration      :ma7, after ma6, 1d
+    SQLite Task Queue                  :done, ma2, 2026-03-21, 1d
+    Merge Agent (pure + sweep)         :done, ma3, 2026-03-21, 1d
+    Pipeline Integration               :done, ma4, 2026-03-21, 1d
+    run.ts Multi-Agent Loop            :done, ma5, 2026-03-21, 1d
+    Orchestrator Queue Seeding         :done, ma6, 2026-03-21, 1d
+    Exports and Final Integration      :done, ma7, 2026-03-21, 1d
 
     section Remaining
     GeminiProvider callWithTools       :r3, after ma7, 2d

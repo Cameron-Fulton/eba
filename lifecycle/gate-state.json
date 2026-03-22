@@ -1,12 +1,12 @@
 {
   "lastCommit": {
-    "sha": "5bbe428",
+    "sha": "be508b5",
     "result": "PASSED",
     "timestamp": "2026-03-21T00:00:00.000Z"
   },
   "currentStory": null,
   "storyGate": {
-    "storyId": "multi-agent-t1",
+    "storyId": "multi-agent-arch",
     "result": "PASSED",
     "timestamp": "2026-03-21T00:00:00.000Z"
   },
