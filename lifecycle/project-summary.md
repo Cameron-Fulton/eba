@@ -1,6 +1,6 @@
 # Project Summary — Episodic Blueprint Architecture (EBA)
 
-> Updated by /audit on 2026-03-21.
+> Updated by /audit on 2026-03-22.
 
 ## Overview
 
@@ -39,24 +39,24 @@ EBA is an autonomous AI engineering system that combines deterministic orchestra
 ## Directory Layout
 
 ```
-src/                    (35 files)
+src/                    (37 files)
   phase1/               memory-packet, negative-knowledge, ai-index, compression-agent, orchestrator
   phase2/               sop, sop-library, thread-manager, thread-executor, tool-shed
   phase3/               consortium-voter, three-pillar-model, visual-proof
   phase4/               arena-loop, parallel-negative-knowledge
-  pipeline/             eba-pipeline, prompt-enhancer, project-orchestrator
-  providers/            claude, gemini, openai, openrouter, model-router, benchmark-updater, model-config.json
+  pipeline/             eba-pipeline, prompt-enhancer, project-orchestrator, task-queue, merge-agent
+  providers/            claude, gemini, openai, openrouter, model-router, benchmark-updater, model-config.json, index, utils
   benchmark/            run-benchmark, sop-coverage, task-corpus
   utils/                shell-test-runner, token-counter
   run.ts                CLI entry point (with SOP auto-selection)
   run-arena.ts          Arena loop entry point (real test-runner wired)
   scheduler.ts          Benchmark scheduler
   index.ts              Public API barrel export
-tests/                  (27 files, 229 tests)
+tests/                  (30 files, 283 tests)
 docs/
   PROJECT.md            High-level architecture description
   ACTIVE_TASK.md        Current task: fix platform portability
-  memory-packets/       Compressed session JSON outputs (7 packets)
+  memory-packets/       Compressed session JSON outputs (1 packet)
   solutions/            Negative knowledge markdown store
   logs/                 Execution logs
   kamakazi/             Integration probe notes
@@ -72,26 +72,24 @@ lifecycle/
 
 ## Current State
 
-**Branch:** main (+ uncommitted security/portability fixes)
-**Latest committed:** 0b988e7 (2026-03-19) feat: implement tool-calling loop
-**Uncommitted changes:** 14 files covering security hardening (path traversal, command injection), callWithTools for OpenAI/OpenRouter, SOP auto-selection, arena real test-runner, ai-index fallback, KNOWN_GOOD_MODELS externalized
-**Active task:** Fix platform portability (ai-index fallback, cross-platform tool executors)
-**Development span:** 2026-03-14 to 2026-03-21 (8 days, 20 commits + pending)
+**Branch:** `feat/multi-agent-architecture` (active development)
+**Latest committed:** 31cca91 (2026-03-21) chore: /harden multi-agent-arch
+**Uncommitted changes:** 12 modified files (providers, pipeline, phase modules) + untracked test files and config
+**Active task:** Multi-agent architecture complete; no active task defined
+**Development span:** 2026-03-14 to 2026-03-22 (9 days, 20 commits on feature branch)
 
 ### Test Health
-- **229 tests across 27 suites:** 219 passing, 10 failing
-- **ai-index.test.ts (10 failures):** better-sqlite3 native module not compiled for Win32. The fallback path has its own passing test (ai-index-fallback.test.ts).
-- **tool-executor.test.ts:** Now passing (fixed by /harden)
+- **283 tests across 30 suites:** All passing
 - **Typecheck:** Clean (no errors)
 - **CVEs:** 0 vulnerabilities
 
 ### Dependency Health
-- @anthropic-ai/sdk 0.78.0 to 0.80.0 available (minor)
-- openai 6.29.0 to 6.32.0 available (minor, in-range)
-- better-sqlite3 11.x to 12.8.0 available (major)
-- jest 29.x to 30.3.0 available (major)
-- @types/jest 29.x to 30.0.0 available (major)
-- @types/node 20.x to 25.5.0 available (major)
+- @anthropic-ai/sdk 0.78.0 → 0.80.0 available (minor, out of semver range)
+- openai 6.29.0 → 6.32.0 available (minor, in-range)
+- better-sqlite3 11.10.0 → 12.8.0 available (major)
+- jest 29.7.0 → 30.3.0 available (major)
+- @types/jest 29.5.14 → 30.0.0 available (major)
+- @types/node 20.19.37 → 25.5.0 available (major)
 
 ## Recent Learnings
 
@@ -105,8 +103,8 @@ lifecycle/
 
 - **better-sqlite3 platform incompatibility:** Native module fails on Win32. The fallback path works but FTS5 search quality is reduced to linear scan.
 - **GeminiProvider lacks callWithTools:** Only provider without tool-calling support. Will throw if Gemini is primary and the tool-calling loop is used.
-- **No CLAUDE.md:** Project has no project-level CLAUDE.md for contributor guidance.
-- **Uncommitted work:** 14 files of security + portability fixes are uncommitted.
+- **Uncommitted work on feature branch:** 12 modified files on `feat/multi-agent-architecture` not yet merged to `main`.
+- **Major dependency versions available:** jest 30, better-sqlite3 12, @types/node 25 — evaluate for upgrade.
 
 ## System Architecture
 
@@ -121,6 +119,8 @@ graph TD
         PIPE[EBAPipeline]
         PE[PromptEnhancer - call + callWithTools]
         PO[ProjectOrchestrator]
+        TQ[TaskQueue - SQLite WAL]
+        MA[MergeAgent - sweep + lockfile]
     end
 
     subgraph Phase1
@@ -132,7 +132,7 @@ graph TD
     end
 
     subgraph Phase2
-        SOP[SOPEngine - 9 workflows]
+        SOP[SOPEngine - 10 workflows]
         TM[ThreadManager]
         TE[ThreadExecutor]
         TS[ToolShed - sandboxed execution]
@@ -159,10 +159,13 @@ graph TD
     end
 
     RUN --> PO --> PIPE
+    RUN --> TQ
     ARENA --> AL
     PIPE --> PE --> ORCH
     PIPE --> NK
     PIPE --> CA --> MP
+    PIPE --> TQ
+    PIPE --> MA
     ORCH --> TM --> TE
     ORCH --> TS
     ORCH --> TPM
@@ -175,6 +178,8 @@ graph TD
     AL --> ORCH
     AL --> PNK --> NK
     NK --> AI
+    MA --> MP
+    TQ -.-> MA
 ```
 
 ## Data Flow
@@ -191,12 +196,14 @@ flowchart LR
 
     subgraph Processing
         PO[ProjectOrchestrator - selects next task]
+        TQ[TaskQueue - atomic claim/release]
         SOP_SEL[SOP Auto-Select - keyword matching]
         PE[PromptEnhancer - SOP + tools + NK]
         ORCH[Orchestrator - tool-calling loop]
         VALIDATE[validatePath - path containment]
         CV[ConsortiumVoter - escalation]
         TPM[3PM Gate - critical = block]
+        MA[MergeAgent - packet merge + sweep]
     end
 
     subgraph Output
@@ -208,7 +215,8 @@ flowchart LR
     TASK --> PO
     PROJECT --> PO
     PACKETS --> PO
-    PO --> TASK
+    PO --> TQ
+    TQ --> TASK
     TASK --> SOP_SEL --> PE
     SOLUTIONS --> PE
     PE --> ORCH
@@ -216,7 +224,7 @@ flowchart LR
     ORCH --> CV
     ORCH --> LOGS
     ORCH --> NEW_NK
-    ORCH --> NEW_PACKETS
+    ORCH --> MA --> NEW_PACKETS
 ```
 
 ## Progress Gantt

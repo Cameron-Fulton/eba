@@ -1,106 +1,86 @@
-# Next Session Bootstrap Prompt
+# EBA — Next Session Bootstrap
 
-## Project
-**Episodic Blueprint Architecture (EBA)** — `/mnt/d/projects/eba`
-An autonomous AI engineering system with episodic memory, thread isolation, multi-model validation, and a four-phase architecture.
+## System state
+- Branch: `main`
+- Last known verification state: **229 tests passing across 27 suites**, exit 0
+- Security posture after last session: **hardened**
+  - Path containment in file tooling
+  - Bash command prefix allowlist
+  - Injection-safe test command execution
+  - Critical-action approval gate enforced even in dev mode by default
+- Session closed with no reported failing checks; start by confirming with:
+  - `npm test`
+  - `npm run lint`
 
-## Environment Notes
-- WSL2 on Windows NTFS mount — **Jest and ts-jest hang without `--runInBand`**
-- Fix is already applied: `tsconfig.json` has `isolatedModules: true`, `package.json` test script is `jest --runInBand --forceExit`
-- Always run tests via `npm test` or `node_modules/.bin/jest --runInBand --forceExit`
-- Node v22.22.1, Jest 29.7.0, TypeScript 5.3.3
+## What was completed last session
+A focused security hardening pass addressed a 23-finding audit for commit `6ad7244`. All escalated findings (**4 CRITICAL + 2 HIGH**) were resolved.
 
-## Current State (commit e53c0ce, current HEAD)
-- **Branch:** main (synced with origin/main)
-- **Tests:** 22 suites, 195 tests — all passing, exit 0
-- **Benchmark:** 1.000 (10/10 SOP coverage — all task types covered)
-- **npm audit:** 0 vulnerabilities
-- **Active task:** Implement tool-calling loop (see ACTIVE_TASK.md)
+Implemented changes:
+- `ToolShed` gained project-root path containment (`projectRoot` + path validation)
+- `bash_execute` gained strict prefix allowlist (`npm`, `npx`, `jest`, `git`, `node`, `ts-node`, `tsc`)
+- `test_runner` moved from string-based `execSync` invocation to `execFileSync` with argument arrays
+- Three-Pillar defaults now classify `bash_execute` as `critical` + `requires_approval: true`
+- Dev mode no longer silently bypasses critical approvals; override is explicit via `EBA_AUTO_APPROVE_CRITICAL=true`
+- `PromptEnhancer` now correctly proxies `callWithTools`, restoring wrapped-provider tool-calling behavior
 
-## What Was Done This Session
+Files changed in that session:
+- `src/phase2/tool-shed.ts`
+- `src/phase3/three-pillar-model.ts`
+- `src/pipeline/prompt-enhancer.ts`
+- `src/run.ts`
+- `tests/phase2/tool-executor.test.ts`
+- `tests/phase1/tool-loop.test.ts`
 
-### 1. Jest Fix (WSL2)
-- Root cause: ts-jest type-checker and Jest worker pool both hang on NTFS mounts
-- Fix: `isolatedModules: true` in `tsconfig.json` (transpile-only, no tsc hang)
-- Fix: `--runInBand` in `package.json` test script (single process, no worker pool)
+## Security model (new — important for next engineer)
+1. **Project-root containment (ToolShed)**
+   - File operations are still available (by design), but now constrained to a validated `projectRoot` boundary.
+   - This blocks traversal/out-of-scope access without removing core functionality.
 
-### 2. Security Hardening
-All of the following were applied and committed in `3f2f028`:
+2. **Bash prefix allowlist**
+   - `bash_execute` only permits approved prefixes: `npm`, `npx`, `jest`, `git`, `node`, `ts-node`, `tsc`.
+   - This preserves legitimate engineering workflows while reducing arbitrary shell abuse surface.
 
-| Severity | Location | Fix |
-|----------|----------|-----|
-| High | `src/run.ts` | TEST_COMMAND rejects shell metacharacters (; \| & $ ` < >) |
-| High | `src/run-arena.ts` | SOLUTIONS_DIR validated to stay inside project root |
-| Medium | `src/pipeline/prompt-enhancer.ts` | NK entries sanitized (headers/bold stripped) before LLM injection |
-| Medium | `src/pipeline/eba-pipeline.ts` | approvalMode defaults to 'strict'; dev is explicit opt-in |
-| Medium | `src/providers/model-router.ts` | destroy() added; static instances Set is now cleanable |
-| Medium | `src/scheduler.ts` | Returns NodeJS.Timeout; SIGINT/SIGTERM/exit handlers wired in run.ts |
-| Low | `src/phase1/negative-knowledge.ts` | Math.random() replaced with crypto.randomUUID() |
+3. **Injection-safe test runner execution**
+   - `test_runner` now uses `execFileSync` with arg arrays (no interpolated shell string).
+   - This eliminates the specific injection class tied to command-string construction.
 
-## Architecture Quick Reference
-```text
-Phase 1 — Memory & Orchestration
-  orchestrator.ts          BlueprintOrchestrator — retry loop, context saturation
-  negative-knowledge.ts    NegativeKnowledgeStore — prevents repeating failures
-  ai-index.ts              SQLite FTS5 search index for NK
-  compression-agent.ts     Compresses sessions into MemoryPackets
-  memory-packet.ts         MemoryPacket schema and validation
+4. **Critical gate enforcement in dev mode**
+   - `bash_execute` is now first-class critical risk in 3PM defaults.
+   - Critical actions are blocked by default even when running with dev ergonomics.
+   - Local override requires **explicit opt-in**: `EBA_AUTO_APPROVE_CRITICAL=true` in `.env.local`.
 
-Phase 2 — SOPs & Threading
-  sop.ts                   SOPEngine — workflow step management
-  sop-library.ts           Pre-built SOP definitions
-  thread-manager.ts        Concurrent task dispatch with timeout
-  thread-executor.ts       Adapter: orchestrator => thread episode
-  tool-shed.ts             Tool registry with category/risk filtering
+## Open items (prioritized)
+1. **Implement `code_analyzer` (currently no-op stub).**
+   - It currently returns path-only output without meaningful analysis.
+   - Add real analysis behavior and tests that validate non-trivial results.
 
-Phase 3 — Validation & Trust
-  consortium-voter.ts      Multi-model consensus (Claude + Gemini + GPT)
-  three-pillar-model.ts    Transparency / Accountability / Trustworthiness
-  visual-proof.ts          Post-success verification hook system
+2. **Compute real `fidelity_score` in `compression-agent`.**
+   - It is currently hardcoded at `1.0`.
+   - Replace with measurable scoring (coverage/retention quality) + test assertions.
 
-Phase 4 — Optimisation
-  arena-loop.ts            Iterative metric optimisation loop
-  parallel-negative-knowledge.ts  Concurrent failure avoidance
+3. **Document `EBA_AUTO_APPROVE_CRITICAL` in `.env.local.example` with warning language.**
+   - Must communicate that enabling it weakens default critical-action safeguards.
 
-Pipeline
-  eba-pipeline.ts          Full integration: NK => SOP => Orchestrator => Compression
-  prompt-enhancer.ts       Injects NK + SOP + tools into every LLM prompt
+4. **Regenerate architecture diagrams (currently `diagramDrift: true`).**
+   - Run the relevant audit/regeneration flow and commit updated visual artifacts.
 
-Providers
-  model-router.ts          Routes by complexity: routine / standard / complex
-  claude-provider.ts       Anthropic SDK
-  gemini-provider.ts       Google Generative AI SDK
-  openai-provider.ts       OpenAI SDK
-  openrouter-provider.ts   OpenRouter (OpenAI-compat)
-  benchmark-updater.ts     Fetches model benchmarks to pick best OpenRouter models
-  scheduler.ts             Periodic benchmark refresh (NodeJS.Timeout handle returned)
+## Known deferred findings
+- Prompt injection via transcript context: accepted for now (internal data boundary + NK sanitization considered sufficient defense-in-depth)
+- Long functions in tool-shed/pipeline orchestration: readability acceptable at present
+- `code_analyzer` no-op and `fidelity_score` hardcoded: tracked for follow-up
+- Diagram drift pending regeneration: deferred to next audit cycle
 
-Entry Points
-  run.ts                   Main — boots full pipeline from ACTIVE_TASK.md
-  run-arena.ts             Arena loop runner
-```
+## Key architectural notes
+- `PromptEnhancer` now proxies `callWithTools` correctly (tool-calling no longer dropped through wrapper path).
+- `createDefaultToolShed` supports optional `projectRoot`, and call sites should pass explicit roots when operating in temp/test sandboxes.
+- Three-Pillar default for `bash_execute` is now `critical` with `requires_approval: true`.
+- Dev mode no longer auto-approves critical actions unless `EBA_AUTO_APPROVE_CRITICAL=true` is explicitly set.
 
-## Open Items (prioritised)
-1. **Tool-calling loop** — THE critical missing piece. LLM generates text but cannot apply changes. See ACTIVE_TASK.md for full spec.
-2. **Tool executors** — ToolShed has schemas but no executor functions. Need read/write/search/execute implementations.
-3. **Provider tool-use API** — LLMProvider interface needs callWithTools(). Start with ClaudeProvider using Anthropic tool_use.
-4. **3PM gating on tool execution** — ThreePillarModel must sit in the tool execution path, not just the orchestrator retry path.
+## Environment
+- WSL2 environment
+- Node.js 22
+- Jest 29
+- TypeScript 5.3.3
+- Use: `npm test` (configured as `jest --runInBand --forceExit` for WSL2 stability)
+- Typecheck/lint gate: `npm run lint`
 
-## How to Pick Up
-```bash
-cd /mnt/d/projects/eba
-npm test                     # verify 195 tests still green
-cat docs/ACTIVE_TASK.md      # check for assigned work
-git log --oneline -5  # HEAD should be e53c0ce
-```
-
-## Key Commands
-```bash
-npm test                          # full suite (runInBand + forceExit)
-npm run lint                      # tsc --noEmit type check
-npm run build                     # compile to dist/
-npx ts-node src/run.ts            # run pipeline against ACTIVE_TASK.md
-npx ts-node src/run-arena.ts      # run arena optimisation loop
-git log --oneline -5              # recent commits
-git push                          # push 2 pending commits to origin
-```
