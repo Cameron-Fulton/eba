@@ -1,10 +1,15 @@
 {
   "lastCommit": {
-    "sha": "78336c0",
+    "sha": "adc7ceb",
     "result": "PASSED",
     "timestamp": "2026-03-22T00:00:00.000Z"
   },
-  "currentStory": null,
+  "currentTask": null,
+  "lastHarden": {
+    "taskId": "task-intake",
+    "result": "PASSED",
+    "timestamp": "2026-03-22T00:00:00.000Z"
+  },
   "storyGate": {
     "storyId": "provider-hardening",
     "result": "PASSED",
