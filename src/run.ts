@@ -45,6 +45,8 @@ import { ShellTestRunner } from './utils/shell-test-runner';
 import { ProjectOrchestrator } from './pipeline/project-orchestrator';
 import { TaskQueue } from './pipeline/task-queue';
 import { MergeAgent } from './pipeline/merge-agent';
+import { TaskIntake } from './pipeline/task-intake';
+import { ContextDiscovery } from './pipeline/context-discovery';
 
 const ROOT_DIR      = path.resolve(__dirname, '..');
 const DOCS_DIR      = path.join(ROOT_DIR, 'docs');
@@ -327,33 +329,92 @@ async function main() {
     return;
   }
 
-  // --- Legacy single-agent mode below ---
+  // --- Single-agent mode ---
 
-  // Boot planning: read PROJECT.md + latest memory packet, select next task
-  const planning = await projectOrchestrator.planNextTask();
-  if (planning.chosenThread) {
-    console.log(`📋 Project mode: selected "${planning.chosenThread.topic}" from open threads`);
-  } else {
-    console.log('📋 Manual mode: using existing ACTIVE_TASK.md');
+  const INTAKE_DIR = path.join(DOCS_DIR, 'task-intake');
+  let taskText: string;
+  let taskSource: string;
+  let targetProjectDir: string = ROOT_DIR;
+  let intakeRef: { intake: TaskIntake; task: { content: string; priority: number; sourcePath: string } } | null = null;
+
+  // Priority 1: CLI argument
+  const cliTask = process.argv[2];
+  if (cliTask && cliTask.trim().length > 0 && !cliTask.startsWith('-')) {
+    taskText = `# Active Task\n\n## Task\n${cliTask.trim()}`;
+    taskSource = 'CLI argument';
+  }
+  // Priority 2: Intake drop zone
+  else {
+    const intake = new TaskIntake(INTAKE_DIR);
+    const intakeTask = intake.peek();
+
+    if (intakeTask) {
+      taskText = `# Active Task\n\n## Task\n${intakeTask.content}`;
+      taskSource = `intake file (priority: ${intakeTask.priority})`;
+      intakeRef = { intake, task: intakeTask };
+    }
+    // Priority 3: Orchestrator (memory packet threads)
+    else {
+      const planning = await projectOrchestrator.planNextTask();
+      if (planning.chosenThread) {
+        console.log(`📋 Project mode: selected "${planning.chosenThread.topic}" from open threads`);
+      } else {
+        console.log('📋 Fallback: using existing ACTIVE_TASK.md');
+      }
+
+      // Priority 4: Whatever is in ACTIVE_TASK.md
+      const taskFile = path.join(DOCS_DIR, 'ACTIVE_TASK.md');
+      if (!fs.existsSync(taskFile)) {
+        console.error('❌ No task found — no CLI arg, no intake files, no ACTIVE_TASK.md');
+        process.exit(1);
+      }
+      taskText = fs.readFileSync(taskFile, 'utf-8');
+      taskSource = 'ACTIVE_TASK.md';
+    }
   }
 
-  // --- Validate active task ---
-  const taskFile = path.join(DOCS_DIR, 'ACTIVE_TASK.md');
-  if (!fs.existsSync(taskFile)) {
-    console.error(`❌ No ACTIVE_TASK.md found at ${taskFile}`);
-    process.exit(1);
+  // Write resolved task to ACTIVE_TASK.md (for intake/CLI paths)
+  if (taskSource !== 'ACTIVE_TASK.md') {
+    const taskFile = path.join(DOCS_DIR, 'ACTIVE_TASK.md');
+    fs.writeFileSync(taskFile, taskText, 'utf-8');
   }
-  const taskText = fs.readFileSync(taskFile, 'utf-8');
+
+  // Discover project context
+  const contextDiscovery = new ContextDiscovery(targetProjectDir);
+  const projectContext = contextDiscovery.discover();
+  if (projectContext.sources.length > 0) {
+    console.log(`📖 Project context: ${projectContext.sources.length} file(s) loaded`);
+    if (projectContext.truncated) {
+      console.warn('⚠️  Project context was truncated to 50,000 characters');
+    }
+  }
+
+  // Read .eba.json for test command override
+  const ebaConfigPath = path.join(targetProjectDir, '.eba.json');
+  let ebaTestCommand: string | undefined;
+  if (fs.existsSync(ebaConfigPath)) {
+    try {
+      const ebaConfig = JSON.parse(fs.readFileSync(ebaConfigPath, 'utf-8'));
+      if (ebaConfig.test_command) {
+        if (!SAFE_COMMAND.test(ebaConfig.test_command)) {
+          console.error(`❌ .eba.json test_command contains disallowed characters: "${ebaConfig.test_command}"`);
+          process.exit(1);
+        }
+        ebaTestCommand = ebaConfig.test_command;
+      }
+    } catch { /* invalid JSON */ }
+  }
+
   const taskType = detectTaskType(taskText);
   const selectedSop = selectSOP(taskText, sop);
-  const testCommand = taskType === 'probe'
-    ? 'test -f docs/validation_report.md || test -f docs/pitfalls.md'
-    : envTestCommand;
+  const testCommand = ebaTestCommand
+    ?? (taskType === 'probe'
+      ? 'test -f docs/validation_report.md || test -f docs/pitfalls.md'
+      : envTestCommand);
 
-  // --- Wire real test runner ---
   const testRunner = new ShellTestRunner({
-    command:   testCommand,
-    cwd:       ROOT_DIR,
+    command: testCommand,
+    cwd: targetProjectDir,
     timeoutMs: 120_000,
   });
 
@@ -372,16 +433,20 @@ async function main() {
     testRunner,
     projectOrchestrator,
     approvalMode: 'dev',
+    projectContext: projectContext.content || undefined,
+    targetProjectDir: targetProjectDir !== ROOT_DIR ? targetProjectDir : undefined,
   });
 
-  console.log(`📋 Active task: ${(taskText.split('\n')[2] ?? '(see ACTIVE_TASK.md)').trim()}`);
+  console.log(`📋 Task source: ${taskSource}`);
+  console.log(`📋 Active task: ${(taskText.split('\n').find(l => l.trim().length > 0 && !l.startsWith('#')) ?? '(see ACTIVE_TASK.md)').trim()}`);
   console.log(`🤖 Primary model: ${primaryModel}`);
   console.log(`🧪 Test command:  ${testCommand}`);
   console.log('🗳️  Consortium:   Claude Opus + Gemini Pro + GPT-4o');
   console.log(`📋 SOP:           ${selectedSop.name} (${selectedSop.id})\n`);
 
+  let result: Awaited<ReturnType<typeof pipeline.run>> | undefined;
   try {
-    const result = await pipeline.run();
+    result = await pipeline.run();
 
     console.log('');
     if (result.status === 'success') {
@@ -403,6 +468,15 @@ async function main() {
   } catch (err) {
     console.error('\n❌ Pipeline error:', err instanceof Error ? err.message : String(err));
     process.exit(1);
+  }
+
+  // After pipeline completes — move intake file
+  if (intakeRef && result) {
+    if (result.status === 'success') {
+      intakeRef.intake.markProcessed(intakeRef.task);
+    } else {
+      intakeRef.intake.markFailed(intakeRef.task);
+    }
   }
 }
 
