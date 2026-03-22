@@ -22,12 +22,38 @@ export interface PromptEnhancerConfig {
   maxNkEntries?:    number;
   /** Max number of tools to inject (default: 3) */
   maxTools?:        number;
+  /** Project context from ContextDiscovery, injected at prompt start */
+  projectContext?: string;
 }
 
 export class PromptEnhancer implements LLMProvider {
   private config: PromptEnhancerConfig;
+  callWithTools?: (messages: Message[], tools: ToolSchema[]) => Promise<LLMResponse>;
+
   constructor(config: PromptEnhancerConfig) {
     this.config = config;
+
+    // Only expose callWithTools when the underlying provider supports it
+    if (config.provider.callWithTools) {
+      this.callWithTools = async (messages: Message[], tools: ToolSchema[]): Promise<LLMResponse> => {
+        let lastUserIndex = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'user' && typeof messages[i].content === 'string') {
+            lastUserIndex = i;
+            break;
+          }
+        }
+
+        const enhancedMessages = messages.map((message, index) => {
+          if (index === lastUserIndex && message.role === 'user' && typeof message.content === 'string') {
+            return { ...message, content: this.enhance(message.content) };
+          }
+          return message;
+        });
+
+        return config.provider.callWithTools!(enhancedMessages, tools);
+      };
+    }
   }
 
   async call(prompt: string): Promise<string> {
@@ -35,31 +61,13 @@ export class PromptEnhancer implements LLMProvider {
     return this.config.provider.call(enhanced);
   }
 
-  async callWithTools(messages: Message[], tools: ToolSchema[]): Promise<LLMResponse> {
-    if (!this.config.provider.callWithTools) {
-      throw new Error('Underlying provider does not implement callWithTools');
-    }
-
-    let lastUserIndex = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'user' && typeof messages[i].content === 'string') {
-        lastUserIndex = i;
-        break;
-      }
-    }
-
-    const enhancedMessages = messages.map((message, index) => {
-      if (index === lastUserIndex && message.role === 'user' && typeof message.content === 'string') {
-        return { ...message, content: this.enhance(message.content) };
-      }
-      return message;
-    });
-
-    return this.config.provider.callWithTools(enhancedMessages, tools);
-  }
-
   enhance(prompt: string): string {
     const sections: string[] = [];
+
+    // --- 0. Project context (highest priority, placed first) ---
+    if (this.config.projectContext) {
+      sections.push('## Project Context\n' + this.config.projectContext);
+    }
 
     // --- 1. SOP context ---
     const step = this.config.sop.getCurrentStep();
