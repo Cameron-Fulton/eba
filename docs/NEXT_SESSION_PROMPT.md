@@ -1,86 +1,43 @@
 # EBA — Next Session Bootstrap
 
-## System state
-- Branch: `main`
-- Last known verification state: **229 tests passing across 27 suites**, exit 0
-- Security posture after last session: **hardened**
-  - Path containment in file tooling
-  - Bash command prefix allowlist
-  - Injection-safe test command execution
-  - Critical-action approval gate enforced even in dev mode by default
-- Session closed with no reported failing checks; start by confirming with:
-  - `npm test`
-  - `npm run lint`
+## Quick Start
+```
+Read memory/INDEX.md then load memory/mp-003-20260322-provider-hardening-merge-to-main.md
+```
 
-## What was completed last session
-A focused security hardening pass addressed a 23-finding audit for commit `6ad7244`. All escalated findings (**4 CRITICAL + 2 HIGH**) were resolved.
+## System State (as of 2026-03-22)
+- **Branch:** `main` (clean, all work merged)
+- **Tests:** 288 passing across 31 suites, 0 failures
+- **Typecheck:** Clean (tsc --noEmit passes)
+- **CVEs:** 0 vulnerabilities
+- **Lifecycle:** /audit + /harden both passed. gate-state.json is clean (currentStory: null)
 
-Implemented changes:
-- `ToolShed` gained project-root path containment (`projectRoot` + path validation)
-- `bash_execute` gained strict prefix allowlist (`npm`, `npx`, `jest`, `git`, `node`, `ts-node`, `tsc`)
-- `test_runner` moved from string-based `execSync` invocation to `execFileSync` with argument arrays
-- Three-Pillar defaults now classify `bash_execute` as `critical` + `requires_approval: true`
-- Dev mode no longer silently bypasses critical approvals; override is explicit via `EBA_AUTO_APPROVE_CRITICAL=true`
-- `PromptEnhancer` now correctly proxies `callWithTools`, restoring wrapped-provider tool-calling behavior
+## What Was Accomplished This Session
+1. Ran /audit — fixed context drift in project-summary.md, patterns-reference.md, CLAUDE.md (test counts, file counts, branch info, SOP count, diagrams all corrected)
+2. Implemented GeminiProvider callWithTools — all 4 providers now have full tool-calling support
+3. Updated .gitignore for test/lint artifacts and IDE files
+4. Merged `feat/multi-agent-architecture` (22 commits) to `main` via fast-forward
+5. Ran /harden — caught and fixed Gemini functionResponse.name bug (was using tool_call_id instead of function name), switched to crypto.randomUUID() for IDs
+6. Extracted solution to lifecycle/solutions.md, updated Gantt chart
 
-Files changed in that session:
-- `src/phase2/tool-shed.ts`
-- `src/phase3/three-pillar-model.ts`
-- `src/pipeline/prompt-enhancer.ts`
-- `src/run.ts`
-- `tests/phase2/tool-executor.test.ts`
-- `tests/phase1/tool-loop.test.ts`
+## Architecture Summary
+- **4 phases:** Memory & Orchestration → SOPs & Threading → Validation & Safety → Optimization
+- **4 providers:** Claude, OpenAI, OpenRouter, Gemini — all with call() + callWithTools()
+- **Multi-agent:** SQLite task queue (WAL), MergeAgent, per-agent isolation (EBA_MULTI_AGENT=true)
+- **10 SOPs** including infrastructure_probe
+- **Security:** path containment, command allowlist, execFileSync, 3PM gating
 
-## Security model (new — important for next engineer)
-1. **Project-root containment (ToolShed)**
-   - File operations are still available (by design), but now constrained to a validated `projectRoot` boundary.
-   - This blocks traversal/out-of-scope access without removing core functionality.
+## What's Next (no active task — choose one)
+- **Live API integration testing** — callWithTools is unit-tested with mocks but not battle-tested against real Gemini/OpenAI/OpenRouter APIs
+- **Dependency upgrades** — jest 30, better-sqlite3 12, @types/node 25 are available (major bumps)
+- **Use EBA as a library** — the public API (src/index.ts) exports everything; ready to be consumed by another project
+- **Multi-agent live test** — run with EBA_MULTI_AGENT=true and multiple processes to test the task queue + merge agent under real concurrency
+- **New feature work** — the system is feature-complete for its current scope; any new work would extend its capabilities
 
-2. **Bash prefix allowlist**
-   - `bash_execute` only permits approved prefixes: `npm`, `npx`, `jest`, `git`, `node`, `ts-node`, `tsc`.
-   - This preserves legitimate engineering workflows while reducing arbitrary shell abuse surface.
-
-3. **Injection-safe test runner execution**
-   - `test_runner` now uses `execFileSync` with arg arrays (no interpolated shell string).
-   - This eliminates the specific injection class tied to command-string construction.
-
-4. **Critical gate enforcement in dev mode**
-   - `bash_execute` is now first-class critical risk in 3PM defaults.
-   - Critical actions are blocked by default even when running with dev ergonomics.
-   - Local override requires **explicit opt-in**: `EBA_AUTO_APPROVE_CRITICAL=true` in `.env.local`.
-
-## Open items (prioritized)
-1. **Implement `code_analyzer` (currently no-op stub).**
-   - It currently returns path-only output without meaningful analysis.
-   - Add real analysis behavior and tests that validate non-trivial results.
-
-2. **Compute real `fidelity_score` in `compression-agent`.**
-   - It is currently hardcoded at `1.0`.
-   - Replace with measurable scoring (coverage/retention quality) + test assertions.
-
-3. **Document `EBA_AUTO_APPROVE_CRITICAL` in `.env.local.example` with warning language.**
-   - Must communicate that enabling it weakens default critical-action safeguards.
-
-4. **Regenerate architecture diagrams (currently `diagramDrift: true`).**
-   - Run the relevant audit/regeneration flow and commit updated visual artifacts.
-
-## Known deferred findings
-- Prompt injection via transcript context: accepted for now (internal data boundary + NK sanitization considered sufficient defense-in-depth)
-- Long functions in tool-shed/pipeline orchestration: readability acceptable at present
-- `code_analyzer` no-op and `fidelity_score` hardcoded: tracked for follow-up
-- Diagram drift pending regeneration: deferred to next audit cycle
-
-## Key architectural notes
-- `PromptEnhancer` now proxies `callWithTools` correctly (tool-calling no longer dropped through wrapper path).
-- `createDefaultToolShed` supports optional `projectRoot`, and call sites should pass explicit roots when operating in temp/test sandboxes.
-- Three-Pillar default for `bash_execute` is now `critical` with `requires_approval: true`.
-- Dev mode no longer auto-approves critical actions unless `EBA_AUTO_APPROVE_CRITICAL=true` is explicitly set.
-
-## Environment
-- WSL2 environment
-- Node.js 22
-- Jest 29
-- TypeScript 5.3.3
-- Use: `npm test` (configured as `jest --runInBand --forceExit` for WSL2 stability)
-- Typecheck/lint gate: `npm run lint`
-
+## Key Files
+- `src/run.ts` — CLI entry point with SOP auto-selection
+- `src/run-arena.ts` — Arena loop entry point
+- `src/index.ts` — Public API barrel export
+- `lifecycle/gate-state.json` — Lifecycle state tracker
+- `lifecycle/project-summary.md` — Full project summary with Mermaid diagrams
+- `lifecycle/solutions.md` — Curated solutions (8 entries)
