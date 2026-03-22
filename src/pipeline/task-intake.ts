@@ -23,13 +23,17 @@ export class TaskIntake {
 
     if (files.length === 0) return null;
 
-    const parsed = files.map(f => {
+    const parsed = files.flatMap(f => {
       const fullPath = path.join(this.intakeDir, f);
-      const raw = fs.readFileSync(fullPath, 'utf-8');
-      const { content, priority } = this.parseFrontmatter(raw);
-      const mtime = fs.statSync(fullPath).mtimeMs;
-      return { content, priority, sourcePath: fullPath, mtime };
-    }).filter(t => t.content.trim().length > 0);
+      try {
+        const raw = fs.readFileSync(fullPath, 'utf-8');
+        const { content, priority } = this.parseFrontmatter(raw);
+        const mtime = fs.statSync(fullPath).mtimeMs;
+        return content.trim().length > 0 ? [{ content, priority, sourcePath: fullPath, mtime }] : [];
+      } catch {
+        return []; // file was claimed or removed by another process
+      }
+    });
 
     if (parsed.length === 0) return null;
 
@@ -45,19 +49,20 @@ export class TaskIntake {
   markProcessed(task: IntakeTask): void {
     const processedDir = path.join(this.intakeDir, 'processed');
     fs.mkdirSync(processedDir, { recursive: true });
-    const basename = path.basename(task.sourcePath).replace('.claiming', '');
+    const basename = path.basename(task.sourcePath).replace(/\.claiming$/, '');
     fs.renameSync(task.sourcePath, path.join(processedDir, basename));
   }
 
   markFailed(task: IntakeTask): void {
     const failedDir = path.join(this.intakeDir, 'failed');
     fs.mkdirSync(failedDir, { recursive: true });
-    const basename = path.basename(task.sourcePath).replace('.claiming', '');
+    const basename = path.basename(task.sourcePath).replace(/\.claiming$/, '');
     fs.renameSync(task.sourcePath, path.join(failedDir, basename));
   }
 
   private parseFrontmatter(raw: string): { content: string; priority: number } {
-    const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+    const normalized = raw.replace(/\r\n/g, '\n');
+    const match = normalized.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
     if (!match) return { content: raw.trim(), priority: 10 };
 
     const frontmatter = match[1];
