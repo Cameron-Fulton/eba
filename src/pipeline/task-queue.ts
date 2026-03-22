@@ -183,8 +183,9 @@ export class TaskQueue {
 
     const stats: QueueStats = { pending: 0, claimed: 0, completed: 0, failed: 0, blocked: 0 };
     for (const row of rows) {
-      if (row.status in stats) {
-        (stats as any)[row.status] = row.count;
+      const key = row.status as keyof QueueStats;
+      if (key in stats) {
+        stats[key] = row.count;
       }
     }
     return stats;

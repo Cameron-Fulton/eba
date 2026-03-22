@@ -211,18 +211,12 @@ async function main() {
   // ModelRouter has `routine` (not `fast`) for cheap/fast tasks.
   const routineProvider = router.routine ?? router.standard;
 
-  // --- Boot planning step: read PROJECT.md + latest memory packet, select next task ---
+  // --- Boot planning step ---
   const projectOrchestrator = new ProjectOrchestrator({
     docsDir:    DOCS_DIR,
     packetsDir: PACKETS_DIR,
     provider:   routineProvider,
   });
-  const planning = await projectOrchestrator.planNextTask();
-  if (planning.chosenThread) {
-    console.log(`📋 Project mode: selected "${planning.chosenThread.topic}" from open threads`);
-  } else {
-    console.log('📋 Manual mode: using existing ACTIVE_TASK.md');
-  }
 
   // --- Multi-agent mode (opt-in via EBA_MULTI_AGENT=true) ---
   const multiAgentMode = process.env.EBA_MULTI_AGENT === 'true';
@@ -333,7 +327,15 @@ async function main() {
     return;
   }
 
-  // --- Legacy single-agent mode below (UNCHANGED) ---
+  // --- Legacy single-agent mode below ---
+
+  // Boot planning: read PROJECT.md + latest memory packet, select next task
+  const planning = await projectOrchestrator.planNextTask();
+  if (planning.chosenThread) {
+    console.log(`📋 Project mode: selected "${planning.chosenThread.topic}" from open threads`);
+  } else {
+    console.log('📋 Manual mode: using existing ACTIVE_TASK.md');
+  }
 
   // --- Validate active task ---
   const taskFile = path.join(DOCS_DIR, 'ACTIVE_TASK.md');

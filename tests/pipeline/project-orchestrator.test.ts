@@ -259,4 +259,57 @@ describe('ProjectOrchestrator', () => {
       expect(result.projectGoal).toBe('# The Goal');
     });
   });
+
+  // ── enqueueFromThreads ──────────────────────────────────────────────────
+
+  describe('enqueueFromThreads()', () => {
+    let queueDbPath: string;
+    let queue: import('../../src/pipeline/task-queue').TaskQueue;
+
+    beforeEach(() => {
+      const { TaskQueue } = require('../../src/pipeline/task-queue');
+      queueDbPath = path.join(tempDir, 'test-queue.db');
+      queue = new TaskQueue(queueDbPath);
+    });
+
+    afterEach(() => {
+      queue.close();
+    });
+
+    test('enqueues actionable threads from latest packet', () => {
+      writePacket(packetsDir, {
+        open_threads: [
+          { topic: 'Build auth', status: 'next_up', context: 'Auth system needed' },
+          { topic: 'Add logging', status: 'backlog', context: 'Nice to have' },
+          { topic: 'Fix crash', status: 'blocked', context: 'Waiting on dep', blocked_reason: 'dep broken' },
+        ],
+      });
+      const orch = new ProjectOrchestrator({ docsDir, packetsDir, provider: makeMockProvider() });
+      const count = orch.enqueueFromThreads(queue);
+      expect(count).toBe(2); // next_up + backlog, not blocked
+      const stats = queue.peek();
+      expect(stats.pending).toBe(2);
+    });
+
+    test('returns 0 when no packets exist', () => {
+      const orch = new ProjectOrchestrator({ docsDir, packetsDir, provider: makeMockProvider() });
+      const count = orch.enqueueFromThreads(queue);
+      expect(count).toBe(0);
+    });
+
+    test('next_up threads get higher priority than backlog', () => {
+      writePacket(packetsDir, {
+        open_threads: [
+          { topic: 'Backlog item', status: 'backlog', context: 'Low pri' },
+          { topic: 'Next up item', status: 'next_up', context: 'High pri' },
+        ],
+      });
+      const orch = new ProjectOrchestrator({ docsDir, packetsDir, provider: makeMockProvider() });
+      orch.enqueueFromThreads(queue);
+      // Claim should return next_up first (priority 10 > 0)
+      const claimed = queue.claim('test_agent');
+      expect(claimed).not.toBeNull();
+      expect(claimed!.task).toContain('Next up item');
+    });
+  });
 });
