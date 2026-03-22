@@ -1,7 +1,15 @@
+/**
+ * Context Discovery
+ * Reads project documentation files (SYSTEM.md, CLAUDE.md, AGENTS.md) and
+ * assembles them into a context string for injection into LLM prompts.
+ * Supports markdown file references, .eba.json overrides, and fallback scan.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 
 const MAX_CONTEXT_CHARS = 50_000;
+const TRUNCATION_MARKER = '\n\n[Context truncated at 50,000 characters]';
 const MAX_FALLBACK_FILES = 10;
 const MAX_FILE_SIZE = 20_000;
 
@@ -54,8 +62,9 @@ export class ContextDiscovery {
           const refs = this.parseFileReferences(content);
           for (const ref of refs) {
             const refPath = path.resolve(this.projectDir, ref);
+            if (!this.isWithinProject(refPath)) continue;
             if (fs.existsSync(refPath) && !sources.includes(refPath)) {
-              const refContent = this.safeRead(refPath);
+              const refContent = this.safeRead(refPath, true);
               if (refContent) {
                 sections.push(`## Referenced: ${ref}\n${refContent}`);
                 sources.push(refPath);
@@ -88,8 +97,9 @@ export class ContextDiscovery {
         if (Array.isArray(config.context)) {
           for (const ref of config.context) {
             const refPath = path.resolve(this.projectDir, ref);
+            if (!this.isWithinProject(refPath)) continue;
             if (fs.existsSync(refPath) && !sources.includes(refPath)) {
-              const content = this.safeRead(refPath);
+              const content = this.safeRead(refPath, true);
               if (content) {
                 sections.push(`## .eba.json context: ${ref}\n${content}`);
                 sources.push(refPath);
@@ -103,25 +113,31 @@ export class ContextDiscovery {
     let assembled = sections.join('\n\n');
     let truncated = false;
     if (assembled.length > MAX_CONTEXT_CHARS) {
-      assembled = assembled.slice(0, MAX_CONTEXT_CHARS)
-        + '\n\n[Context truncated at 50,000 characters]';
+      assembled = assembled.slice(0, MAX_CONTEXT_CHARS - TRUNCATION_MARKER.length)
+        + TRUNCATION_MARKER;
       truncated = true;
     }
 
     return { content: assembled, sources, truncated };
   }
 
-  parseFileReferences(content: string): string[] {
+  private parseFileReferences(content: string): string[] {
     const refs: string[] = [];
     const linkPattern = /\[[^\]]*\]\(([^)]+\.(?:md|txt|json))\)/g;
     let match: RegExpExecArray | null;
     while ((match = linkPattern.exec(content)) !== null) {
       const ref = match[1];
-      if (!ref.startsWith('http://') && !ref.startsWith('https://')) {
-        refs.push(ref);
+      if (ref.startsWith('http://') || ref.startsWith('https://') || ref.startsWith('file://')) {
+        continue;
       }
+      refs.push(ref);
     }
     return [...new Set(refs)];
+  }
+
+  private isWithinProject(resolvedPath: string): boolean {
+    const normalized = path.resolve(this.projectDir);
+    return resolvedPath.startsWith(normalized + path.sep) || resolvedPath === normalized;
   }
 
   private fallbackScan(): string[] {
@@ -162,8 +178,12 @@ export class ContextDiscovery {
     return candidates.slice(0, MAX_FALLBACK_FILES);
   }
 
-  private safeRead(filePath: string): string | null {
+  private safeRead(filePath: string, enforceMaxSize = false): string | null {
     try {
+      if (enforceMaxSize) {
+        const stat = fs.statSync(filePath);
+        if (stat.size > MAX_FILE_SIZE) return null;
+      }
       const content = fs.readFileSync(filePath, 'utf-8').trim();
       return content.length > 0 ? content : null;
     } catch { return null; }

@@ -85,4 +85,21 @@ describe('ContextDiscovery', () => {
     const ctx = new ContextDiscovery(tmpDir, '/nonexistent/SYSTEM.md').discover();
     expect(ctx.content).toContain('Rules');
   });
+
+  it('blocks path traversal in markdown references', () => {
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'),
+      'See [secret](../../../etc/passwd.md) for details');
+    const ctx = new ContextDiscovery(tmpDir, '/nonexistent/SYSTEM.md').discover();
+    // Only CLAUDE.md should be in sources — the traversal target must not be read
+    expect(ctx.sources).toHaveLength(1);
+    expect(ctx.content).not.toContain('## Referenced:');
+  });
+
+  it('blocks path traversal in .eba.json context', () => {
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), 'Rules');
+    fs.writeFileSync(path.join(tmpDir, '.eba.json'),
+      JSON.stringify({ context: ['../../../etc/shadow.md'] }));
+    const ctx = new ContextDiscovery(tmpDir, '/nonexistent/SYSTEM.md').discover();
+    expect(ctx.sources).toHaveLength(1); // only CLAUDE.md
+  });
 });
