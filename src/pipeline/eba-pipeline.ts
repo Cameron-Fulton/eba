@@ -89,6 +89,10 @@ export interface EBAPipelineConfig {
   activeTaskPath?: string;
   /** Directory for pending merge packets. When set, pipeline writes result packets here. */
   pendingMergeDir?: string;
+  /** Project context string to inject into prompts */
+  projectContext?: string;
+  /** Target project directory (overrides ROOT_DIR for test runner cwd) */
+  targetProjectDir?: string;
 }
 
 export interface PipelineResult {
@@ -138,6 +142,7 @@ export class EBAPipeline {
       negativeKnowledge: this.negativeKnowledge,
       sop:               this.config.sop,
       toolShed:          this.config.toolShed,
+      projectContext:    this.config.projectContext,
     });
 
     // Log pre-task state via 3PM
@@ -161,7 +166,7 @@ export class EBAPipeline {
       .map(tool => tool.name);
 
     const threadManagerConfig = {
-      timeout_ms: 120_000,
+      timeout_ms: 300_000,  // 5 minutes — agentic tool loops need more time than single calls
       max_concurrent: 1,
       ...this.config.threadManagerConfig,
     };
@@ -180,6 +185,7 @@ export class EBAPipeline {
       executor = createOrchestratorExecutor({
         llmProvider: enhancer,
         testRunner: this.config.testRunner,
+        toolShed: this.config.toolShed,
         attemptNumber: attempt,
         previousFailureOutput,
         contextSaturationThreshold: this.config.contextSaturationThreshold ?? 50_000,
