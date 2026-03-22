@@ -1,14 +1,14 @@
 {
   "lastCommit": {
-    "sha": "be508b5",
+    "sha": "78336c0",
     "result": "PASSED",
-    "timestamp": "2026-03-21T00:00:00.000Z"
+    "timestamp": "2026-03-22T00:00:00.000Z"
   },
   "currentStory": null,
   "storyGate": {
-    "storyId": "multi-agent-arch",
+    "storyId": "provider-hardening",
     "result": "PASSED",
-    "timestamp": "2026-03-21T00:00:00.000Z"
+    "timestamp": "2026-03-22T00:00:00.000Z"
   },
   "diagramDrift": false,
   "lastAudit": "2026-03-22"

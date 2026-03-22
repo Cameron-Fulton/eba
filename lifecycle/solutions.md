@@ -19,6 +19,10 @@ Only allow commands starting with known-safe prefixes (`npm`, `npx`, `jest`, `gi
 
 ## Architecture
 
+### Gemini functionResponse.name must be the function name, not the call ID
+When converting tool results back to Gemini's `functionResponse` format, the `name` field must be the function name that was called (e.g., `file_read`), not the internal tool call ID. Build a `callIdToFnName` map from assistant messages and resolve at response time.
+*Source: 78336c0 /harden provider-hardening (2026-03-22) — multi-turn Gemini tool calling fails silently with wrong name*
+
 ### PromptEnhancer must forward callWithTools
 When wrapping an `LLMProvider` with a decorator, the decorator must implement `callWithTools()` — not just `call()`. Otherwise the tool-calling loop silently breaks because it checks `provider.callWithTools` and finds `undefined`.
 *Source: /harden eba-core-build (2026-03-21) — decorator must forward callWithTools or tool loop silently breaks*

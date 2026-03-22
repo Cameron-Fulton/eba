@@ -102,7 +102,7 @@ lifecycle/
 ## Open Risks
 
 - **better-sqlite3 platform incompatibility:** Native module fails on Win32. The fallback path works but FTS5 search quality is reduced to linear scan.
-- **GeminiProvider lacks callWithTools:** Only provider without tool-calling support. Will throw if Gemini is primary and the tool-calling loop is used.
+- **GeminiProvider callWithTools is new:** All 4 providers now support tool-calling. Gemini implementation is tested but not yet battle-tested with live API calls.
 - **Uncommitted work on feature branch:** 12 modified files on `feat/multi-agent-architecture` not yet merged to `main`.
 - **Major dependency versions available:** jest 30, better-sqlite3 12, @types/node 25 — evaluate for upgrade.
 
@@ -263,6 +263,8 @@ gantt
     Orchestrator Queue Seeding         :done, ma6, 2026-03-21, 1d
     Exports and Final Integration      :done, ma7, 2026-03-21, 1d
 
-    section Remaining
-    GeminiProvider callWithTools       :r3, after ma7, 2d
+    section Provider Hardening
+    GeminiProvider callWithTools       :done, ph1, 2026-03-22, 1d
+    Security + AI Index Fallback       :done, ph2, 2026-03-22, 1d
+    Audit and Merge to Main            :done, ph3, 2026-03-22, 1d
 ```
