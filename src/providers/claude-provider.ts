@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { LLMProvider } from '../phase1/orchestrator';
+import { Message, ToolSchema, LLMResponse, ToolCall } from '../phase1/orchestrator';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
 import { withTimeout } from './utils';
 
@@ -45,6 +46,89 @@ export class ClaudeProvider implements LLMProvider {
       throw new Error(`Unexpected content block type: ${block.type}`);
     }
     return block.text;
+  }
+
+  async callWithTools(messages: Message[], tools: ToolSchema[]): Promise<LLMResponse> {
+    // Convert our ToolSchema format to Anthropic's tool format
+    const anthropicTools: Anthropic.Tool[] = tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: {
+        type: 'object' as const,
+        properties: Object.fromEntries(
+          t.parameters.map(p => [
+            p.name,
+            { type: p.type, description: p.description },
+          ]),
+        ),
+        required: t.parameters.filter(p => p.required).map(p => p.name),
+      },
+    }));
+
+    // Convert our Message format to Anthropic's format
+    const anthropicMessages: Anthropic.MessageParam[] = messages
+      .filter(m => m.role !== 'tool')
+      .map(m => {
+        if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+          return {
+            role: 'assistant' as const,
+            content: m.tool_calls.map(tc => ({
+              type: 'tool_use' as const,
+              id: tc.id,
+              name: tc.name,
+              input: tc.parameters,
+            })),
+          };
+        }
+        return { role: m.role as 'user' | 'assistant', content: m.content };
+      });
+
+    // Inject tool results as user messages (Anthropic requires tool results in user turn)
+    const toolResultMessages = messages.filter(m => m.role === 'tool');
+    for (const trMsg of toolResultMessages) {
+      if (trMsg.tool_results && trMsg.tool_results.length > 0) {
+        anthropicMessages.push({
+          role: 'user' as const,
+          content: trMsg.tool_results.map(tr => ({
+            type: 'tool_result' as const,
+            tool_use_id: tr.tool_call_id,
+            content: tr.content,
+            is_error: tr.is_error,
+          })),
+        });
+      }
+    }
+
+    const response = await withTimeout(
+      this.client.messages.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        tools: anthropicTools,
+        messages: anthropicMessages,
+      }),
+      this.timeoutMs,
+    );
+
+    // If the model wants to call tools
+    const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+    if (toolUseBlocks.length > 0) {
+      const toolCalls: ToolCall[] = toolUseBlocks.map(b => {
+        if (b.type !== 'tool_use') throw new Error('unexpected block type');
+        return {
+          id: b.id,
+          name: b.name,
+          parameters: b.input as Record<string, unknown>,
+        };
+      });
+      return { type: 'tool_calls', tool_calls: toolCalls };
+    }
+
+    // Text response — model is done
+    const textBlock = response.content.find(b => b.type === 'text');
+    if (!textBlock || textBlock.type !== 'text') {
+      throw new Error('No text or tool_use block in Anthropic response');
+    }
+    return { type: 'text', text: textBlock.text };
   }
 
   /** Returns a LLMProviderConfig for use in the ConsortiumVoter */

@@ -14,7 +14,8 @@
 import * as fs   from 'fs';
 import * as path from 'path';
 import { LLMProvider } from '../phase1/orchestrator';
-import { OpenThread, MemoryPacket, deserializePacket } from '../phase1/memory-packet';
+import { OpenThread, MemoryPacket, deserializePacket, serializePacket } from '../phase1/memory-packet';
+import { TaskQueue } from './task-queue';
 
 export interface ProjectOrchestratorConfig {
   /** Directory containing PROJECT.md and ACTIVE_TASK.md */
@@ -83,10 +84,76 @@ export class ProjectOrchestrator {
     // Write chosen task to ACTIVE_TASK.md
     const taskContent = this.buildTaskContent(chosenThread, projectGoal);
     const activeTaskPath = path.join(this.config.docsDir, 'ACTIVE_TASK.md');
+    console.log('🗑️  [Orchestrator] Clear Desk: wiping ACTIVE_TASK.md before writing new task');
+    if (fs.existsSync(activeTaskPath)) {
+      fs.rmSync(activeTaskPath);
+    }
     fs.writeFileSync(activeTaskPath, taskContent, 'utf-8');
-
     console.log(`📋 [Orchestrator] Selected next task: ${chosenThread.topic}`);
     return { chosenTask: taskContent, chosenThread, projectGoal, openThreads };
+  }
+
+  /**
+   * Marks the currently active thread as blocked in the latest memory packet.
+   * Uses fuzzy matching against thread topic/context to find the closest thread.
+   */
+  async markCurrentTaskBlocked(taskTitle: string, reason: string): Promise<boolean> {
+    const latestPacketPath = this.getLatestPacketPath();
+    if (!latestPacketPath) {
+      console.warn('⚠️  [Orchestrator] No memory packet found — cannot mark task as blocked');
+      return false;
+    }
+
+    let packet: MemoryPacket;
+    try {
+      const content = fs.readFileSync(latestPacketPath, 'utf-8');
+      packet = deserializePacket(content);
+    } catch (err) {
+      console.warn(
+        '⚠️  [Orchestrator] Failed to load latest packet for blocked-task update:',
+        err instanceof Error ? err.message : String(err)
+      );
+      return false;
+    }
+
+    if (!packet.open_threads || packet.open_threads.length === 0) {
+      console.warn('⚠️  [Orchestrator] Latest packet has no open threads — cannot mark blocked');
+      return false;
+    }
+
+    const normalizedTask = this.normalizeForMatch(this.extractTaskQuery(taskTitle));
+    let bestIndex = -1;
+    let bestScore = 0;
+
+    packet.open_threads.forEach((thread, index) => {
+      const score = this.computeThreadMatchScore(thread, normalizedTask);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    });
+
+    // Require at least a weak match to avoid blocking unrelated threads.
+    if (bestIndex === -1 || bestScore < 0.2) {
+      console.warn('⚠️  [Orchestrator] Could not confidently match active task to an open thread');
+      return false;
+    }
+
+    const thread = packet.open_threads[bestIndex];
+    thread.status = 'blocked';
+    thread.blocked_reason = reason;
+
+    try {
+      fs.writeFileSync(latestPacketPath, serializePacket(packet), 'utf-8');
+      console.log(`⛔ [Orchestrator] Marked thread as blocked: ${thread.topic}`);
+      return true;
+    } catch (err) {
+      console.warn(
+        '⚠️  [Orchestrator] Failed to persist blocked-task update:',
+        err instanceof Error ? err.message : String(err)
+      );
+      return false;
+    }
   }
 
   /**
@@ -97,7 +164,6 @@ export class ProjectOrchestrator {
     if (!fs.existsSync(projectPath)) return '';
     return fs.readFileSync(projectPath, 'utf-8').trim();
   }
-
   /**
    * Finds and loads the most recent memory packet from packetsDir.
    * Returns null if no packets exist.
@@ -124,6 +190,32 @@ export class ProjectOrchestrator {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Seeds the task queue from open threads in the latest memory packet.
+   * next_up threads get priority 10, backlog gets priority 0.
+   */
+  enqueueFromThreads(queue: TaskQueue): number {
+    const projectGoal = this.loadProjectGoal();
+    const latestPacket = this.loadLatestPacket();
+    const openThreads = latestPacket?.open_threads ?? [];
+
+    const actionable = openThreads.filter(
+      t => t.status === 'next_up' || t.status === 'backlog'
+    );
+    if (actionable.length === 0) return 0;
+
+    let enqueued = 0;
+    for (const thread of actionable) {
+      const taskContent = this.buildTaskContent(thread, projectGoal);
+      queue.enqueue({
+        task: taskContent,
+        priority: thread.status === 'next_up' ? 10 : 0,
+      });
+      enqueued++;
+    }
+    return enqueued;
   }
 
   /**
@@ -178,6 +270,57 @@ export class ProjectOrchestrator {
     return actionable[0];
   }
 
+  private getLatestPacketPath(): string | null {
+    if (!fs.existsSync(this.config.packetsDir)) return null;
+
+    const files = fs.readdirSync(this.config.packetsDir)
+      .filter(f => f.endsWith('.json') && f !== '.gitkeep')
+      .map(f => ({
+        name: f,
+        mtime: fs.statSync(path.join(this.config.packetsDir, f)).mtimeMs,
+      }))
+      .sort((a, b) => b.mtime - a.mtime);
+
+    if (files.length === 0) return null;
+    return path.join(this.config.packetsDir, files[0].name);
+  }
+
+  private extractTaskQuery(taskTitle: string): string {
+    const taskSection = taskTitle.match(/##\s*Task\s*\n([\s\S]*?)(?:\n##\s|$)/i);
+    if (taskSection?.[1]) {
+      return taskSection[1].trim();
+    }
+    return taskTitle.trim();
+  }
+
+  private normalizeForMatch(input: string): string {
+    return input
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private computeThreadMatchScore(thread: OpenThread, normalizedTask: string): number {
+    const topic = this.normalizeForMatch(thread.topic);
+    const context = this.normalizeForMatch(thread.context);
+    const corpus = `${topic} ${context}`.trim();
+
+    if (!normalizedTask || !corpus) return 0;
+    if (topic === normalizedTask || corpus.includes(normalizedTask)) return 1;
+
+    const taskTokens = new Set(normalizedTask.split(' ').filter(Boolean));
+    const corpusTokens = new Set(corpus.split(' ').filter(Boolean));
+    let overlap = 0;
+
+    for (const token of taskTokens) {
+      if (corpusTokens.has(token)) overlap += 1;
+    }
+
+    const denom = Math.max(taskTokens.size, 1);
+    return overlap / denom;
+  }
+
   /**
    * Formats the chosen thread as an ACTIVE_TASK.md task specification.
    */
@@ -185,7 +328,7 @@ export class ProjectOrchestrator {
     return [
       '# Active Task',
       '',
-      `## Project Context`,
+      '## Project Context',
       // First 5 lines — enough to convey the goal without bloating ACTIVE_TASK.md
       projectGoal ? projectGoal.split('\n').slice(0, 5).join('\n') : '(see PROJECT.md)',
       '',

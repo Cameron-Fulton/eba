@@ -6,10 +6,44 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { ToolSchema, ToolShed, ToolExecutionResult } from '../phase2/tool-shed';
+import { ThreePillarModel } from '../phase3/three-pillar-model';
 
 export interface LLMProvider {
   call(prompt: string): Promise<string>;
+  callWithTools?(messages: Message[], tools: ToolSchema[]): Promise<LLMResponse>;
 }
+
+export interface Message {
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  tool_calls?: ToolCall[];
+  tool_results?: ToolResult[];
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  tool_call_id: string;
+  content: string;
+  is_error: boolean;
+}
+
+export interface TextResponse {
+  type: 'text';
+  text: string;
+}
+
+export interface ToolCallResponse {
+  type: 'tool_calls';
+  tool_calls: ToolCall[];
+}
+
+export type LLMResponse = TextResponse | ToolCallResponse;
 
 export interface TestRunner {
   run(): Promise<TestResult>;
@@ -28,6 +62,9 @@ export interface OrchestratorConfig {
   contextSaturationThreshold: number;
   llmProvider: LLMProvider;
   testRunner: TestRunner;
+  toolShed?: ToolShed;
+  threePillarModel?: ThreePillarModel;
+  maxToolIterations?: number;
 }
 
 export interface ExecutionLog {
@@ -131,6 +168,71 @@ export class BlueprintOrchestrator {
     this.writeLog(log);
 
     return log;
+  }
+
+  /**
+   * Agentic tool-calling loop.
+   * Loops: call → handle tool_calls → execute → feed results back → repeat until TextResponse or max iterations.
+   */
+  async executeWithToolLoop(
+    task: string,
+    tools: ToolSchema[],
+    toolShed: ToolShed,
+    threePillarModel?: ThreePillarModel,
+  ): Promise<{ finalText: string; iterations: number; toolCallsMade: ToolCall[] }> {
+    if (!this.config.llmProvider.callWithTools) {
+      throw new Error('LLMProvider does not implement callWithTools');
+    }
+
+    const maxIterations = this.config.maxToolIterations ?? 10;
+    const messages: Message[] = [{ role: 'user', content: task }];
+    const allToolCalls: ToolCall[] = [];
+    let iterations = 0;
+
+    while (iterations < maxIterations) {
+      iterations++;
+      const response = await this.config.llmProvider.callWithTools!(messages, tools);
+
+      if (response.type === 'text') {
+        return { finalText: response.text, iterations, toolCallsMade: allToolCalls };
+      }
+
+      // Append assistant message with tool_calls
+      messages.push({ role: 'assistant', content: '', tool_calls: response.tool_calls });
+
+      // Execute each tool call
+      const toolResults: ToolResult[] = [];
+      for (const toolCall of response.tool_calls) {
+        allToolCalls.push(toolCall);
+
+        // 3PM gate — check approval before write/execute tools
+        const toolSchema = toolShed.get(toolCall.name);
+        const category = toolSchema?.category ?? 'read';
+        if (threePillarModel && (category === 'write' || category === 'execute')) {
+          const { approved } = await threePillarModel.checkAndApprove(toolCall.name, 'orchestrator');
+          if (!approved) {
+            toolResults.push({
+              tool_call_id: toolCall.id,
+              content: `Tool call '${toolCall.name}' was denied by approval gate.`,
+              is_error: true,
+            });
+            continue;
+          }
+        }
+
+        const result: ToolExecutionResult = toolShed.execute(toolCall.name, toolCall.parameters);
+        toolResults.push({
+          tool_call_id: toolCall.id,
+          content: result.success ? result.output : (result.error ?? 'Tool execution failed'),
+          is_error: !result.success,
+        });
+      }
+
+      // Feed results back into messages
+      messages.push({ role: 'tool', content: '', tool_results: toolResults });
+    }
+
+    throw new Error(`Tool loop exceeded max iterations (${maxIterations})`);
   }
 
   private buildPrompt(task: string, attempt: number, previousFailureOutput?: string): string {

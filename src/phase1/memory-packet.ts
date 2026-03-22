@@ -4,6 +4,8 @@
  * Achieves high information density at a fraction of the original transcript size.
  */
 
+import { randomUUID } from 'crypto';
+
 export interface MemoryPacket {
   id: string;
   timestamp: string;
@@ -15,6 +17,9 @@ export interface MemoryPacket {
   key_file_changes: FileChange[];
   summary: string;
   metadata: PacketMetadata;
+  entities?: Entity[];
+  vocabulary?: VocabularyEntry[];
+  session_meta?: SessionMeta;
 }
 
 export interface Decision {
@@ -45,12 +50,32 @@ export interface OpenThread {
    */
   status: 'active' | 'next_up' | 'blocked' | 'backlog';
   context: string;
+  /** Optional detail describing why this thread is blocked. */
+  blocked_reason?: string;
 }
 
 export interface FileChange {
   path: string;
   action: 'created' | 'modified' | 'deleted';
   summary: string;
+}
+
+export interface Entity {
+  name: string;
+  relationship: string;
+  urls: string[];
+  also: string[];
+}
+
+export interface VocabularyEntry {
+  term: string;
+  definition: string;
+  context?: string;
+}
+
+export interface SessionMeta {
+  token_budget_rationale?: string;
+  load_bearing_sections?: string[];
 }
 
 export interface PacketMetadata {
@@ -115,6 +140,22 @@ export function validateMemoryPacket(packet: unknown): { valid: boolean; errors:
     // already caught above
   } else {
     errors.push('metadata must be an object');
+  }
+
+  if (p.entities !== undefined) {
+    if (!Array.isArray(p.entities)) {
+      errors.push('entities must be an array when present');
+    }
+  }
+  if (p.vocabulary !== undefined) {
+    if (!Array.isArray(p.vocabulary)) {
+      errors.push('vocabulary must be an array when present');
+    }
+  }
+  if (p.session_meta !== undefined) {
+    if (typeof p.session_meta !== 'object' || p.session_meta === null || Array.isArray(p.session_meta)) {
+      errors.push('session_meta must be an object when present');
+    }
   }
 
   return { valid: errors.length === 0, errors };
@@ -190,7 +231,7 @@ export function compressTranscript(transcript: string, sessionId: string): Memor
   const compressedTokens = Math.ceil(compressedContent.length / 4);
 
   return {
-    id: `pkt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+    id: `pkt_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 8)}`,
     timestamp: new Date().toISOString(),
     session_id: sessionId,
     decisions,
