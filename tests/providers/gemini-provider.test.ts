@@ -63,7 +63,7 @@ describe('GeminiProvider callWithTools', () => {
       expect(result.tool_calls).toHaveLength(1);
       expect(result.tool_calls[0].name).toBe('file_read');
       expect(result.tool_calls[0].parameters).toEqual({ path: 'README.md' });
-      expect(result.tool_calls[0].id).toMatch(/^gemini_call_/);
+      expect(result.tool_calls[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/);
     }
   });
 
@@ -128,7 +128,7 @@ describe('GeminiProvider callWithTools', () => {
       role: 'function',
       parts: [{
         functionResponse: {
-          name: 'tc_1',
+          name: 'file_read',
           response: { content: 'README contents', is_error: false },
         },
       }],

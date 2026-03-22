@@ -4,6 +4,7 @@
  * Supports Gemini model tiers via a configurable model string.
  */
 
+import * as crypto from 'crypto';
 import { GoogleGenerativeAI, FunctionCallingMode, SchemaType, Content, FunctionDeclarationSchemaProperty } from '@google/generative-ai';
 import type { FunctionDeclaration } from '@google/generative-ai';
 import { LLMProvider, Message, LLMResponse, ToolCall } from '../phase1/orchestrator';
@@ -55,6 +56,10 @@ export class GeminiProvider implements LLMProvider {
       },
     }));
 
+    // Build a map from tool_call_id -> function name for resolving functionResponse.name
+    // (Gemini API requires the function name, not the call ID)
+    const callIdToFnName = new Map<string, string>();
+
     // Convert Message[] to Gemini Content[]
     const contents: Content[] = [];
     for (const msg of messages) {
@@ -62,6 +67,9 @@ export class GeminiProvider implements LLMProvider {
         contents.push({ role: 'user', parts: [{ text: msg.content }] });
       } else if (msg.role === 'assistant') {
         if (msg.tool_calls && msg.tool_calls.length > 0) {
+          for (const tc of msg.tool_calls) {
+            callIdToFnName.set(tc.id, tc.name);
+          }
           contents.push({
             role: 'model',
             parts: msg.tool_calls.map(tc => ({
@@ -76,7 +84,7 @@ export class GeminiProvider implements LLMProvider {
           role: 'function',
           parts: msg.tool_results.map(tr => ({
             functionResponse: {
-              name: tr.tool_call_id,
+              name: callIdToFnName.get(tr.tool_call_id) ?? tr.tool_call_id,
               response: { content: tr.content, is_error: tr.is_error },
             },
           })),
@@ -99,7 +107,7 @@ export class GeminiProvider implements LLMProvider {
 
     if (functionCalls && functionCalls.length > 0) {
       const toolCalls: ToolCall[] = functionCalls.map((fc, i) => ({
-        id: `gemini_call_${Date.now()}_${i}`,
+        id: crypto.randomUUID(),
         name: fc.name,
         parameters: (fc.args ?? {}) as Record<string, unknown>,
       }));

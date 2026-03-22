@@ -20,7 +20,7 @@ Implementations in `src/providers/`:
 - `ClaudeProvider` — implements `call` + `callWithTools` (Anthropic tool_use format)
 - `OpenAIProvider` — implements `call` + `callWithTools` (OpenAI function_call format)
 - `OpenRouterProvider` — implements `call` + `callWithTools` (OpenAI-compatible format)
-- `GeminiProvider` — implements `call` only (no tool-calling support)
+- `GeminiProvider` — implements `call` + `callWithTools` (Google function calling format)
 
 ---
 
@@ -217,6 +217,6 @@ OpenRouter models are now externalized to `src/providers/model-config.json` (no 
 
 ```typescript
 // Reads ACTIVE_TASK.md, matches keywords against a mapping table
-// 9 keyword groups map to 9 SOP definitions
+// 10 keyword groups map to 10 SOP definitions
 // Falls back to refactoring SOP if no keywords match
 ```
