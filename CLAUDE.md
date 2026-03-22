@@ -7,7 +7,10 @@ Autonomous AI engineering system that treats the LLM like an OS kernel: determin
 - **Language:** TypeScript (Node 20+), Jest 29, ts-node
 - **Run tests:** `npm test` (uses --runInBand --forceExit for WSL2 stability)
 - **Type check:** `npm run lint` (tsc --noEmit)
-- **Entry point:** `npx ts-node src/run.ts` — reads ACTIVE_TASK.md and executes it
+- **Entry point:** `npx ts-node src/run.ts` — priority chain resolves task automatically
+- **CLI task:** `npx ts-node src/run.ts "task description"` — bypasses orchestrator
+- **Intake:** Drop `.md` files in `docs/task-intake/` — picked up on next run
+- **Skill:** `/eba task description` — from any project in Claude Code
 - **Arena mode:** `npx ts-node src/run-arena.ts` — runs optimization loop
 
 ## Architecture (4 phases)
@@ -60,11 +63,12 @@ Copy `.env.local.example` to `.env.local` and fill in keys.
 
 ## Current state
 
-- 283 tests passing across 30 suites
+- 312+ tests passing across 34 suites
 - All 4 phases fully implemented including tool-calling loop
-- SOP auto-selection: run.ts keyword-matches ACTIVE_TASK.md to pick the right SOP
-- Security hardened: shell metacharacter guards, path validation, crypto UUIDs
-- Active task: see docs/ACTIVE_TASK.md
+- Task intake: CLI arg, file drop zone, or orchestrator auto-selection
+- Context discovery: auto-reads SYSTEM.md/CLAUDE.md/AGENTS.md from target project
+- SOP auto-selection: keyword-matches task text to pick the right SOP
+- Security hardened: shell metacharacter guards, path validation, path traversal guards, crypto UUIDs
 
 ## WSL2 note
 
