@@ -342,6 +342,11 @@ async function main() {
   if (cliTask && cliTask.trim().length > 0 && !cliTask.startsWith('-')) {
     taskText = `# Active Task\n\n## Task\n${cliTask.trim()}`;
     taskSource = 'CLI argument';
+    // When invoked via CLI, target project is cwd (if different from EBA)
+    const cwd = process.cwd();
+    if (path.resolve(cwd) !== path.resolve(ROOT_DIR)) {
+      targetProjectDir = cwd;
+    }
   }
   // Priority 2: Intake drop zone
   else {

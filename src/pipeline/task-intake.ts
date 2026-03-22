@@ -41,7 +41,13 @@ export class TaskIntake {
 
     const best = parsed[0];
     const claimPath = best.sourcePath + '.claiming';
-    fs.renameSync(best.sourcePath, claimPath);
+    try {
+      fs.renameSync(best.sourcePath, claimPath);
+    } catch (err: unknown) {
+      // Lost race — another process claimed this file
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw err;
+    }
 
     return { content: best.content, priority: best.priority, sourcePath: claimPath };
   }

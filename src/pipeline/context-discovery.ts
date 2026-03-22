@@ -136,8 +136,10 @@ export class ContextDiscovery {
   }
 
   private isWithinProject(resolvedPath: string): boolean {
-    const normalized = path.resolve(this.projectDir);
-    return resolvedPath.startsWith(normalized + path.sep) || resolvedPath === normalized;
+    // Lowercase both paths for case-insensitive comparison on Windows
+    const normalized = path.resolve(this.projectDir).toLowerCase();
+    const target = resolvedPath.toLowerCase();
+    return target.startsWith(normalized + path.sep) || target === normalized;
   }
 
   private fallbackScan(): string[] {
