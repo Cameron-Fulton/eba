@@ -12,15 +12,16 @@
  *   SOLUTIONS_DIR      — path to negative knowledge solutions directory (default: docs/solutions)
  */
 
-import * as path from 'path';
+import path from 'path';
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local' });
 
 import { ArenaLoop, ArenaState } from './phase4/arena-loop';
 import { ParallelNegativeKnowledge } from './phase4/parallel-negative-knowledge';
 import { NegativeKnowledgeStore } from './phase1/negative-knowledge';
+import { ShellTestRunner } from './utils/shell-test-runner';
 
-const ROOT_DIR      = path.resolve(__dirname, '..');
+const ROOT_DIR = path.resolve(__dirname, '..');
 const rawSolutionsDir = process.env.SOLUTIONS_DIR ?? 'docs/solutions';
 const SOLUTIONS_DIR = path.resolve(ROOT_DIR, rawSolutionsDir);
 if (!SOLUTIONS_DIR.startsWith(ROOT_DIR + path.sep) && SOLUTIONS_DIR !== ROOT_DIR) {
@@ -28,8 +29,9 @@ if (!SOLUTIONS_DIR.startsWith(ROOT_DIR + path.sep) && SOLUTIONS_DIR !== ROOT_DIR
 }
 
 const OBJECTIVE_NAME = process.env.ARENA_OBJECTIVE ?? 'test_pass_rate';
-const MAX_ITERATIONS_RAW = parseInt(process.env.ARENA_MAX_ITER  ?? '10', 10);
-const THRESHOLD_RAW      = parseFloat(process.env.ARENA_THRESHOLD ?? '0.01');
+const TEST_COMMAND = 'npm test';
+const MAX_ITERATIONS_RAW = parseInt(process.env.ARENA_MAX_ITER ?? '10', 10);
+const THRESHOLD_RAW = parseFloat(process.env.ARENA_THRESHOLD ?? '0.01');
 
 if (Number.isNaN(MAX_ITERATIONS_RAW)) {
   throw new Error(`ARENA_MAX_ITER is not a valid integer: "${process.env.ARENA_MAX_ITER}"`);
@@ -39,8 +41,7 @@ if (Number.isNaN(THRESHOLD_RAW)) {
 }
 
 const MAX_ITERATIONS = MAX_ITERATIONS_RAW;
-const THRESHOLD      = THRESHOLD_RAW;
-const DETERMINISTIC  = process.env.ARENA_DETERMINISTIC === '1';
+const THRESHOLD = THRESHOLD_RAW;
 
 async function main() {
   console.log('\n🏟️  EBA Arena Loop — Phase 4\n');
@@ -55,17 +56,33 @@ async function main() {
 
   const pnk = new ParallelNegativeKnowledge(nkStore);
 
-  // Simulated objective: pass rate derived from negative knowledge density.
-  // In production, replace with a real test-runner invocation that returns
-  // a normalized score (0.0–1.0).
-  const objectiveFn = async (state: ArenaState): Promise<number> => {
-    const allEntries  = nkStore.getAll();
-    const totalFailed = allEntries.length;
-    // Objective: fewer failures → higher score. Normalize over max expected failures (100).
-    const raw  = Math.max(0, 1.0 - totalFailed / 100);
-    // Decay slightly each iteration to simulate real variance (disabled in deterministic mode)
-    const noise = DETERMINISTIC ? 0 : (Math.random() - 0.5) * 0.02;
-    return Math.min(1.0, Math.max(0.0, raw + noise));
+  // Real objective: run tests and score from actual results.
+  // Returns 1.0 on full pass. On failure, attempts to parse Jest pass rate
+  // from output using "X passed, Y total"; falls back to 0.0.
+  const objectiveFn = async (_state: ArenaState): Promise<number> => {
+    const testRunner = new ShellTestRunner({
+      command: TEST_COMMAND,
+      cwd: ROOT_DIR,
+      timeoutMs: 120_000,
+    });
+
+    const result = await testRunner.run();
+    if (result.passed) {
+      return 1.0;
+    }
+
+    const passRateMatch = result.output.match(/(\d+)\s+passed,\s+(\d+)\s+total/i);
+    if (!passRateMatch) {
+      return 0.0;
+    }
+
+    const passedCount = parseInt(passRateMatch[1], 10);
+    const totalCount = parseInt(passRateMatch[2], 10);
+    if (Number.isNaN(passedCount) || Number.isNaN(totalCount) || totalCount <= 0) {
+      return 0.0;
+    }
+
+    return passedCount / totalCount;
   };
 
   // Optimizer: check PNK for avoided approaches, log them, suggest next parameters
@@ -87,9 +104,9 @@ async function main() {
 
   const arena = new ArenaLoop(
     {
-      objective_name:       OBJECTIVE_NAME,
-      objective_fn:         objectiveFn,
-      max_iterations:       MAX_ITERATIONS,
+      objective_name: OBJECTIVE_NAME,
+      objective_fn: objectiveFn,
+      max_iterations: MAX_ITERATIONS,
       improvement_threshold: THRESHOLD,
       optimizer,
     },
@@ -118,12 +135,12 @@ async function main() {
   if (finalState.best_metric < 0.5) {
     try {
       await pnk.recordAttempt({
-        thread_id:          'arena-main',
-        task:               OBJECTIVE_NAME,
-        approach:           `ArenaLoop/${MAX_ITERATIONS}-iterations`,
+        thread_id: 'arena-main',
+        task: OBJECTIVE_NAME,
+        approach: `ArenaLoop/${MAX_ITERATIONS}-iterations`,
         avoided_approaches: await pnk.getAvoidedApproaches(OBJECTIVE_NAME),
-        result:             'failure',
-        timestamp:          new Date().toISOString(),
+        result: 'failure',
+        timestamp: new Date().toISOString(),
       });
       console.log('📝 Low-metric run recorded to negative knowledge store');
     } catch (recordErr) {
@@ -132,7 +149,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('\n❌ Arena error:', err);
   process.exit(1);
 });

@@ -33,6 +33,7 @@ interface ArtificialAnalysisModel {
 interface ModelConfig {
   updated_at: string;
   interval_hours?: number;
+  known_good_models?: string[];
   openrouter: OpenRouterModelConfig;
 }
 
@@ -56,9 +57,7 @@ const DEFAULT_OPENROUTER_MODELS: OpenRouterModelConfig = {
   complex: 'moonshotai/kimi-k2-thinking',
 };
 
-// TODO: Externalize KNOWN_GOOD_MODELS to a config file or environment-driven list
-// so that adding/removing trusted models doesn't require a code change.
-const KNOWN_GOOD_MODELS = new Set<string>([
+const DEFAULT_KNOWN_GOOD_MODEL_IDS = [
   'qwen/qwen3-coder',
   'minimax/minimax-m2.5',
   'moonshotai/kimi-k2-thinking',
@@ -67,13 +66,15 @@ const KNOWN_GOOD_MODELS = new Set<string>([
   'openai/gpt-5',
   'openai/gpt-4o',
   'anthropic/claude-sonnet-4-5',
-]);
+];
 
 export class BenchmarkUpdater {
   private readonly configPath: string;
+  private knownGoodModels: Set<string>;
 
   constructor(configPath: string) {
     this.configPath = configPath;
+    this.knownGoodModels = new Set(DEFAULT_KNOWN_GOOD_MODEL_IDS);
   }
 
   static async update(configPath: string): Promise<void> {
@@ -88,6 +89,7 @@ export class BenchmarkUpdater {
     }
 
     const existingConfig = this.readConfig();
+    this.knownGoodModels = new Set(existingConfig.known_good_models ?? DEFAULT_KNOWN_GOOD_MODEL_IDS);
     const models = await this.fetchModels();
 
     if (models.length === 0) {
@@ -104,6 +106,7 @@ export class BenchmarkUpdater {
     const nextConfig: ModelConfig = {
       updated_at: new Date().toISOString(),
       interval_hours: existingConfig.interval_hours ?? DEFAULT_INTERVAL_HOURS,
+      known_good_models: Array.from(this.knownGoodModels),
       openrouter: {
         routine: routinePick.model.id,
         standard: standardPick.model.id,
@@ -306,7 +309,7 @@ export class BenchmarkUpdater {
   }
 
   private isKnownGood(modelId: string): boolean {
-    return KNOWN_GOOD_MODELS.has(modelId);
+    return this.knownGoodModels.has(modelId);
   }
 
   private isPremiumPriced(model: OpenRouterModel): boolean {
@@ -320,6 +323,7 @@ export class BenchmarkUpdater {
     const defaults: ModelConfig = {
       updated_at: new Date(0).toISOString(),
       interval_hours: DEFAULT_INTERVAL_HOURS,
+      known_good_models: [...DEFAULT_KNOWN_GOOD_MODEL_IDS],
       openrouter: { ...DEFAULT_OPENROUTER_MODELS },
     };
 
@@ -340,6 +344,10 @@ export class BenchmarkUpdater {
     return {
       updated_at: parsed.updated_at ?? defaults.updated_at,
       interval_hours: parsed.interval_hours ?? DEFAULT_INTERVAL_HOURS,
+      known_good_models:
+        parsed.known_good_models && parsed.known_good_models.length > 0
+          ? parsed.known_good_models
+          : [...DEFAULT_KNOWN_GOOD_MODEL_IDS],
       openrouter: {
         routine: parsed.openrouter?.routine ?? DEFAULT_OPENROUTER_MODELS.routine,
         standard: parsed.openrouter?.standard ?? DEFAULT_OPENROUTER_MODELS.standard,

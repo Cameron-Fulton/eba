@@ -21,3 +21,17 @@ data/task-queue.db-wal
 data/task-queue.db-shm
 docs/pending_merge/
 docs/ACTIVE_TASK_agent_*.md
+
+# Test/lint artifacts
+jest-report.json
+jest-results.json
+tsc-report.json
+.jest-openrouter-tools.code
+.jest-openrouter-tools.out
+slate_probe.txt
+slate_tmp_jest.exit
+
+# IDE / tooling
+.vscode/
+.slate/
+.slate_tmp/

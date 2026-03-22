@@ -9,7 +9,7 @@ describe('ToolShed.execute()', () => {
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-executor-'));
-    shed = createDefaultToolShed();
+    shed = createDefaultToolShed(tempDir);
   });
 
   afterEach(() => {
@@ -90,14 +90,14 @@ describe('ToolShed.execute()', () => {
 
   describe('bash_execute', () => {
     test('bash_execute runs a command and returns output', () => {
-      const result = shed.execute('bash_execute', { command: 'echo hello_from_bash' }, tempDir);
+      const result = shed.execute('bash_execute', { command: 'node -e "process.stdout.write(\'hello_from_bash\')"' }, tempDir);
 
       expect(result.success).toBe(true);
       expect(result.output.trim()).toBe('hello_from_bash');
     });
 
     test('bash_execute returns error for failing command', () => {
-      const result = shed.execute('bash_execute', { command: 'exit 1' }, tempDir);
+      const result = shed.execute('bash_execute', { command: 'node -e "process.exit(1)"' }, tempDir);
 
       expect(result.success).toBe(false);
       expect(result.error).toBeDefined();

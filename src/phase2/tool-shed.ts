@@ -6,14 +6,39 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
+
+function walkDir(dir: string, extensions?: string[]): string[] {
+  const results: string[] = [];
+  const exts = extensions ?? ['.ts', '.js', '.json', '.md'];
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      results.push(...walkDir(fullPath, exts));
+    } else if (entry.isFile()) {
+      if (exts.length === 0 || exts.some(ext => entry.name.endsWith(ext))) {
+        results.push(fullPath);
+      }
+    }
+  }
+  return results;
+}
 
 export interface ToolSchema {
   name: string;
   description: string;
   category: 'read' | 'write' | 'execute' | 'search' | 'analyze';
   parameters: ToolParameter[];
-  risk_level: 'low' | 'medium' | 'high';
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
 }
 
 export interface ToolParameter {
@@ -29,8 +54,120 @@ export interface ToolExecutionResult {
   error?: string;
 }
 
+export interface ExternalPathApprovalRequest {
+  action: 'bash_execute';
+  risk_level: 'critical';
+  external_path: string;
+  project_root: string;
+  command: string;
+  prompt: string;
+  timestamp: string;
+}
+
+export type ExternalPathApprovalHandler = (request: ExternalPathApprovalRequest) => boolean;
+
+function promptApproval(message: string): boolean {
+  process.stdout.write(message);
+
+  const inputBuffer = Buffer.alloc(1024);
+  let input = '';
+
+  while (!input.includes('\n')) {
+    const bytesRead = fs.readSync(process.stdin.fd, inputBuffer, 0, inputBuffer.length, null);
+    if (bytesRead <= 0) break;
+    input += inputBuffer.toString('utf-8', 0, bytesRead);
+  }
+
+  const normalized = input.trim().toLowerCase();
+  return normalized === 'y' || normalized === 'yes';
+}
+
 export class ToolShed {
   private tools: Map<string, ToolSchema> = new Map();
+  private projectRoot: string;
+  private externalPathApprovalHandler: ExternalPathApprovalHandler;
+
+  constructor(projectRoot?: string, approvalHandler?: ExternalPathApprovalHandler) {
+    this.projectRoot = projectRoot ? path.resolve(projectRoot) : path.resolve(process.cwd());
+    this.externalPathApprovalHandler = approvalHandler ?? (request => promptApproval(request.prompt));
+  }
+
+  private validatePath(filePath: string): string {
+    if (typeof filePath !== 'string' || filePath.trim() === '') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+
+    const resolvedPath = path.resolve(this.projectRoot, filePath);
+    if (!this.isWithinProjectRoot(resolvedPath)) {
+      throw new Error(`Path escapes project root: ${filePath}`);
+    }
+
+    return resolvedPath;
+  }
+
+  private isWithinProjectRoot(candidatePath: string): boolean {
+    const normalizedRoot = path.resolve(this.projectRoot);
+    const normalizedCandidate = path.resolve(candidatePath);
+    return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(normalizedRoot + path.sep);
+  }
+
+  private extractPathCandidates(command: string): string[] {
+    const tokens = command.match(/(?:"[^"]*"|'[^']*'|\S+)/g) ?? [];
+    const candidates: string[] = [];
+
+    for (const token of tokens) {
+      const unquoted = token.replace(/^['"]|['"]$/g, '');
+      const value = unquoted.includes('=') ? unquoted.split('=').pop() ?? '' : unquoted;
+      if (!value) continue;
+
+      const looksLikePath =
+        value.startsWith('/') ||
+        /^[A-Za-z]:[\\/]/.test(value) ||
+        value.startsWith('./') ||
+        value.startsWith('../');
+
+      if (looksLikePath) {
+        candidates.push(value);
+      }
+    }
+
+    return [...new Set(candidates)];
+  }
+
+  private resolveCandidatePath(candidate: string, baseCwd: string): string {
+    const isAbsolute = candidate.startsWith('/') || /^[A-Za-z]:[\\/]/.test(candidate);
+    if (isAbsolute) {
+      return path.resolve(candidate);
+    }
+
+    return path.resolve(baseCwd, candidate);
+  }
+
+  private buildExternalPathPermissionDeniedError(externalPath: string): Error {
+    return new Error(
+      `Permission Denied: bash_execute attempted to access external path '${externalPath}' which is outside the project root '${this.projectRoot}'. To allow this, a human must explicitly approve external path access via 3PM gating.`,
+    );
+  }
+
+  private approveExternalPathAccess(command: string, externalPath: string): boolean {
+    const prompt = `[3PM GATE] bash_execute wants to access external path: ${externalPath}\nProject root: ${this.projectRoot}\nCommand: ${command}\nApprove external access? (y/N): `;
+
+    const request: ExternalPathApprovalRequest = {
+      action: 'bash_execute',
+      risk_level: 'critical',
+      external_path: externalPath,
+      project_root: this.projectRoot,
+      command,
+      prompt,
+      timestamp: new Date().toISOString(),
+    };
+
+    return this.externalPathApprovalHandler(request);
+  }
+
+  setExternalPathApprovalHandler(handler: ExternalPathApprovalHandler): void {
+    this.externalPathApprovalHandler = handler;
+  }
 
   register(tool: ToolSchema): void {
     this.tools.set(tool.name, tool);
@@ -102,12 +239,12 @@ export class ToolShed {
     try {
       switch (toolName) {
         case 'file_read': {
-          const filePath = params['path'] as string;
+          const filePath = this.validatePath(params['path'] as string);
           const content = fs.readFileSync(filePath, 'utf-8');
           return { success: true, output: content };
         }
         case 'file_write': {
-          const filePath = params['path'] as string;
+          const filePath = this.validatePath(params['path'] as string);
           const content = params['content'] as string;
           const dir = path.dirname(filePath);
           if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -115,7 +252,7 @@ export class ToolShed {
           return { success: true, output: `Written to ${filePath}` };
         }
         case 'file_edit': {
-          const filePath = params['path'] as string;
+          const filePath = this.validatePath(params['path'] as string);
           const oldText = params['old_text'] as string;
           const newText = params['new_text'] as string;
           const existing = fs.readFileSync(filePath, 'utf-8');
@@ -127,34 +264,102 @@ export class ToolShed {
         }
         case 'bash_execute': {
           const command = params['command'] as string;
+          const trimmedCommand = command.trim();
+          const allowedPrefixes = ['npm ', 'npx ', 'jest ', 'git ', 'node ', 'ts-node ', 'tsc '];
+          const isAllowed = allowedPrefixes.some(prefix => trimmedCommand.startsWith(prefix));
+
+          if (!isAllowed) {
+            return {
+              success: false,
+              output: '',
+              error: `Command not allowed. Allowed prefixes: ${allowedPrefixes.join(', ')}`,
+            };
+          }
+
+          const effectiveCwd = path.resolve(cwd ?? this.projectRoot);
+          const pathCandidates = this.extractPathCandidates(command);
+          for (const candidate of pathCandidates) {
+            const resolvedCandidatePath = this.resolveCandidatePath(candidate, effectiveCwd);
+            if (!this.isWithinProjectRoot(resolvedCandidatePath)) {
+              const approved = this.approveExternalPathAccess(command, resolvedCandidatePath);
+              if (!approved) {
+                throw this.buildExternalPathPermissionDeniedError(resolvedCandidatePath);
+              }
+            }
+          }
+
+          if (process.platform === 'win32') {
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[ToolShed] bash_execute: bash may not be available on Windows. Consider using PowerShell or WSL.',
+            );
+          }
           const output = execSync(command, { cwd, encoding: 'utf-8', timeout: 30000 });
           return { success: true, output };
         }
         case 'test_runner': {
           const filter = params['filter'] as string | undefined;
-          const cmd = filter
-            ? `npx jest --testNamePattern="${filter}" --runInBand --forceExit`
-            : 'npx jest --runInBand --forceExit';
-          const out = execSync(cmd, { cwd: cwd ?? process.cwd(), encoding: 'utf-8', timeout: 120000 });
+          const args = ['jest', '--runInBand', '--forceExit'];
+          if (filter) {
+            args.push('--testNamePattern', filter);
+          }
+
+          const out = execFileSync('npx', args, {
+            cwd: cwd ?? process.cwd(),
+            encoding: 'utf-8',
+            timeout: 120000,
+          });
           return { success: true, output: out };
         }
         case 'grep_search': {
           const pattern = params['pattern'] as string;
-          const searchPath = (params['path'] as string | undefined) ?? '.';
-          const escaped = pattern.replace(/"/g, '\\"');
-          const out = execSync(
-            `grep -r --include="*.ts" -n "${escaped}" "${searchPath}" 2>/dev/null || true`,
-            { cwd, encoding: 'utf-8' },
-          );
-          return { success: true, output: out || '(no matches)' };
+          const baseCwd = cwd ?? process.cwd();
+          const requestedPath = (params['path'] as string | undefined) ?? '.';
+          const searchRoot = path.isAbsolute(requestedPath) ? requestedPath : path.resolve(baseCwd, requestedPath);
+          const extensions = (params['extensions'] as string[] | undefined) ?? ['.ts', '.js', '.json', '.md'];
+
+          const files = walkDir(searchRoot, extensions);
+          const matches: string[] = [];
+          let regex: RegExp | null = null;
+          try {
+            regex = new RegExp(pattern);
+          } catch {
+            regex = null;
+          }
+
+          for (const file of files) {
+            let content: string;
+            try {
+              content = fs.readFileSync(file, 'utf-8');
+            } catch {
+              continue;
+            }
+
+            const lines = content.split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i];
+              const isMatch = regex ? regex.test(line) : line.includes(pattern);
+              if (isMatch) {
+                const displayPath = path.relative(baseCwd, file) || file;
+                matches.push(`${displayPath}:${i + 1}:${line}`);
+              }
+            }
+          }
+
+          return { success: true, output: matches.length > 0 ? matches.join('\n') : '(no matches)' };
         }
         case 'glob_find': {
           const pattern = params['pattern'] as string;
-          const out = execSync(`find . -name "${pattern}" 2>/dev/null || true`, {
-            cwd,
-            encoding: 'utf-8',
-          });
-          return { success: true, output: out || '(no matches)' };
+          const baseCwd = cwd ?? process.cwd();
+          const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+          const globRegex = new RegExp(`^${escaped}$`);
+          const files = walkDir(baseCwd, []);
+
+          const matches = files
+            .filter(filePath => globRegex.test(path.basename(filePath)))
+            .map(filePath => path.relative(baseCwd, filePath) || filePath);
+
+          return { success: true, output: matches.length > 0 ? matches.join('\n') : '(no matches)' };
         }
         case 'code_analyzer': {
           const analyzePath = params['path'] as string;
@@ -171,8 +376,8 @@ export class ToolShed {
 }
 
 /** Default tools that model a typical AI engineering environment */
-export function createDefaultToolShed(): ToolShed {
-  const shed = new ToolShed();
+export function createDefaultToolShed(projectRoot?: string): ToolShed {
+  const shed = new ToolShed(projectRoot);
 
   shed.register({
     name: 'file_read',
@@ -210,7 +415,7 @@ export function createDefaultToolShed(): ToolShed {
     description: 'Execute a bash shell command',
     category: 'execute',
     parameters: [{ name: 'command', type: 'string', required: true, description: 'Command to run' }],
-    risk_level: 'high',
+    risk_level: 'critical',
   });
 
   shed.register({

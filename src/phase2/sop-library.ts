@@ -432,3 +432,68 @@ export function createPerformanceOptimizationSOP(): SOPDefinition {
     ],
   };
 }
+
+export function createInfrastructureProbeSOP(): SOPDefinition {
+  return {
+    id: 'infrastructure_probe',
+    name: 'Infrastructure & System Probe Workflow',
+    description: 'Exploratory audit, system analysis, directory mapping, and infrastructure investigation tasks. Uses shell access and produces a validation report rather than passing tests.',
+    initial_step: 'build_scenario_profile',
+    steps: [
+      {
+        id: 'build_scenario_profile',
+        name: 'Build Scenario Profile',
+        description: 'Map the system, service, or directory structure being investigated. Understand scope and boundaries.',
+        allowed_tool_categories: ['read', 'search', 'execute'],
+        allowed_tools: ['file_read', 'glob_find', 'grep_search', 'bash_execute', 'code_analyzer'],
+        requires_approval: false,
+        next_steps: ['research'],
+      },
+      {
+        id: 'research',
+        name: 'Research & Context Gathering',
+        description: 'Check existing documentation, prior findings, architecture guides, or system logs relevant to the probe.',
+        allowed_tool_categories: ['read', 'search'],
+        allowed_tools: ['file_read', 'glob_find', 'grep_search'],
+        requires_approval: false,
+        next_steps: ['create_probe'],
+      },
+      {
+        id: 'create_probe',
+        name: 'Create Validation Probe',
+        description: 'Write a probe script (probe_script.sh) or structured query plan that will surface the information needed. For directory audits, map structure. For services, write connectivity/health checks.',
+        allowed_tool_categories: ['read', 'search', 'write', 'execute'],
+        allowed_tools: ['file_read', 'file_write', 'file_edit', 'glob_find', 'grep_search', 'bash_execute'],
+        requires_approval: false,
+        next_steps: ['execute_and_document'],
+      },
+      {
+        id: 'execute_and_document',
+        name: 'Execute and Document Findings',
+        description: 'Run the probe, iterate on failures, and document all discovered issues, structures, and anomalies into pitfalls.md and a running findings log.',
+        allowed_tool_categories: ['read', 'search', 'write', 'execute'],
+        allowed_tools: ['file_read', 'file_write', 'file_edit', 'glob_find', 'grep_search', 'bash_execute', 'code_analyzer'],
+        requires_approval: false,
+        next_steps: ['deliver_context_bundle'],
+      },
+      {
+        id: 'deliver_context_bundle',
+        name: 'Deliver Context Bundle',
+        description: 'Produce the final validation_report.md and pitfalls.md. Summarise all findings, recommendations, and next steps for the orchestrator.',
+        allowed_tool_categories: ['read', 'write'],
+        allowed_tools: ['file_read', 'file_write', 'file_edit'],
+        requires_approval: false,
+        next_steps: ['complete'],
+      },
+      {
+        id: 'complete',
+        name: 'Complete',
+        description: 'Probe complete. Validation report and pitfalls document delivered.',
+        allowed_tool_categories: ['read'],
+        allowed_tools: [],
+        requires_approval: false,
+        next_steps: [],
+      },
+    ],
+  };
+}

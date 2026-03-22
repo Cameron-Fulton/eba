@@ -5,8 +5,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { LLMProvider } from '../phase1/orchestrator';
-import { Message, ToolSchema, LLMResponse, ToolCall } from '../phase1/orchestrator';
+import { LLMProvider, Message, LLMResponse, ToolCall } from '../phase1/orchestrator';
+import { ToolSchema, ToolParameter } from '../phase2/tool-shed';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
 import { withTimeout } from './utils';
 
@@ -21,7 +21,7 @@ export class ClaudeProvider implements LLMProvider {
   private maxTokens: number;
   private timeoutMs: number;
 
-  constructor(model: ClaudeModel = 'claude-sonnet-4-6', maxTokens = 8192, timeoutMs = 60000) {
+  constructor(model: ClaudeModel = 'claude-sonnet-4-6', maxTokens = 8192, timeoutMs = 180000) {
     if (!process.env.ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY environment variable is not set');
     }
@@ -56,12 +56,12 @@ export class ClaudeProvider implements LLMProvider {
       input_schema: {
         type: 'object' as const,
         properties: Object.fromEntries(
-          t.parameters.map(p => [
+          t.parameters.map((p: ToolParameter) => [
             p.name,
             { type: p.type, description: p.description },
           ]),
         ),
-        required: t.parameters.filter(p => p.required).map(p => p.name),
+        required: t.parameters.filter((p: ToolParameter) => p.required).map((p: ToolParameter) => p.name),
       },
     }));
 

@@ -4,8 +4,10 @@
  * Supports Gemini model tiers via a configurable model string.
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { LLMProvider } from '../phase1/orchestrator';
+import { GoogleGenerativeAI, FunctionCallingMode, SchemaType, Content, FunctionDeclarationSchemaProperty } from '@google/generative-ai';
+import type { FunctionDeclaration } from '@google/generative-ai';
+import { LLMProvider, Message, LLMResponse, ToolCall } from '../phase1/orchestrator';
+import { ToolSchema, ToolParameter } from '../phase2/tool-shed';
 import { LLMProviderConfig } from '../phase3/consortium-voter';
 import { withTimeout } from './utils';
 
@@ -18,7 +20,7 @@ export class GeminiProvider implements LLMProvider {
   private model: GeminiModel;
   private timeoutMs: number;
 
-  constructor(model: GeminiModel = 'gemini-3-flash-preview', timeoutMs = 60000) {
+  constructor(model: GeminiModel = 'gemini-3-flash-preview', timeoutMs = 180000) {
     if (!process.env.GOOGLE_API_KEY) {
       throw new Error('GOOGLE_API_KEY environment variable is not set');
     }
@@ -32,6 +34,79 @@ export class GeminiProvider implements LLMProvider {
     const result = await withTimeout(generativeModel.generateContent(prompt), this.timeoutMs);
     const response = result.response;
     return response.text();
+  }
+
+  async callWithTools(messages: Message[], tools: ToolSchema[]): Promise<LLMResponse> {
+    // Map ToolParameter.type string to a typed Schema object
+    const toSchemaProperty = (p: ToolParameter): FunctionDeclarationSchemaProperty => {
+      return { type: p.type as SchemaType, description: p.description } as FunctionDeclarationSchemaProperty;
+    };
+
+    // Convert ToolSchema[] to Gemini FunctionDeclaration[]
+    const functionDeclarations: FunctionDeclaration[] = tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: {
+        type: SchemaType.OBJECT,
+        properties: Object.fromEntries(
+          t.parameters.map((p: ToolParameter) => [p.name, toSchemaProperty(p)]),
+        ),
+        required: t.parameters.filter((p: ToolParameter) => p.required).map((p: ToolParameter) => p.name),
+      },
+    }));
+
+    // Convert Message[] to Gemini Content[]
+    const contents: Content[] = [];
+    for (const msg of messages) {
+      if (msg.role === 'user') {
+        contents.push({ role: 'user', parts: [{ text: msg.content }] });
+      } else if (msg.role === 'assistant') {
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          contents.push({
+            role: 'model',
+            parts: msg.tool_calls.map(tc => ({
+              functionCall: { name: tc.name, args: tc.parameters },
+            })),
+          });
+        } else {
+          contents.push({ role: 'model', parts: [{ text: msg.content }] });
+        }
+      } else if (msg.role === 'tool' && msg.tool_results) {
+        contents.push({
+          role: 'function',
+          parts: msg.tool_results.map(tr => ({
+            functionResponse: {
+              name: tr.tool_call_id,
+              response: { content: tr.content, is_error: tr.is_error },
+            },
+          })),
+        });
+      }
+    }
+
+    const generativeModel = this.client.getGenerativeModel({ model: this.model });
+    const result = await withTimeout(
+      generativeModel.generateContent({
+        contents,
+        tools: [{ functionDeclarations }],
+        toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.AUTO } },
+      }),
+      this.timeoutMs,
+    );
+
+    const response = result.response;
+    const functionCalls = response.functionCalls();
+
+    if (functionCalls && functionCalls.length > 0) {
+      const toolCalls: ToolCall[] = functionCalls.map((fc, i) => ({
+        id: `gemini_call_${Date.now()}_${i}`,
+        name: fc.name,
+        parameters: (fc.args ?? {}) as Record<string, unknown>,
+      }));
+      return { type: 'tool_calls', tool_calls: toolCalls };
+    }
+
+    return { type: 'text', text: response.text() };
   }
 
   /** Returns a LLMProviderConfig for use in the ConsortiumVoter */

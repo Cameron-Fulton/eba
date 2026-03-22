@@ -8,10 +8,10 @@
  * This keeps the orchestrator untouched while giving it full context.
  */
 
-import { LLMProvider } from '../phase1/orchestrator';
+import { LLMProvider, Message, LLMResponse } from '../phase1/orchestrator';
 import { NegativeKnowledgeStore } from '../phase1/negative-knowledge';
 import { SOPEngine } from '../phase2/sop';
-import { ToolShed } from '../phase2/tool-shed';
+import { ToolShed, ToolSchema } from '../phase2/tool-shed';
 
 export interface PromptEnhancerConfig {
   provider:         LLMProvider;
@@ -33,6 +33,29 @@ export class PromptEnhancer implements LLMProvider {
   async call(prompt: string): Promise<string> {
     const enhanced = this.enhance(prompt);
     return this.config.provider.call(enhanced);
+  }
+
+  async callWithTools(messages: Message[], tools: ToolSchema[]): Promise<LLMResponse> {
+    if (!this.config.provider.callWithTools) {
+      throw new Error('Underlying provider does not implement callWithTools');
+    }
+
+    let lastUserIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user' && typeof messages[i].content === 'string') {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    const enhancedMessages = messages.map((message, index) => {
+      if (index === lastUserIndex && message.role === 'user' && typeof message.content === 'string') {
+        return { ...message, content: this.enhance(message.content) };
+      }
+      return message;
+    });
+
+    return this.config.provider.callWithTools(enhancedMessages, tools);
   }
 
   enhance(prompt: string): string {
