@@ -48,6 +48,9 @@ import { MergeAgent } from './pipeline/merge-agent';
 import { TaskIntake } from './pipeline/task-intake';
 import { ContextDiscovery } from './pipeline/context-discovery';
 
+/** Allowlist: only permit safe characters for shell test commands */
+const SAFE_COMMAND = /^[a-zA-Z0-9 _.\-\/=]+$/;
+
 const ROOT_DIR      = path.resolve(__dirname, '..');
 const DOCS_DIR      = path.join(ROOT_DIR, 'docs');
 const LOGS_DIR      = path.join(DOCS_DIR, 'logs');
@@ -154,8 +157,6 @@ async function main() {
   // --- Config from env ---
   const envTestCommand = process.env.TEST_COMMAND ?? 'npm test';
 
-  // Allowlist: only permit safe characters for a shell test command from env
-  const SAFE_COMMAND = /^[a-zA-Z0-9 _.\-\/=]+$/;
   if (!SAFE_COMMAND.test(envTestCommand)) {
     console.error(`❌ TEST_COMMAND contains disallowed characters: "${envTestCommand}"`);
     console.error('   Only alphanumeric characters, spaces, hyphens, underscores, dots, slashes and = are allowed.');
