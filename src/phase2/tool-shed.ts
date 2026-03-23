@@ -107,10 +107,18 @@ export class ToolShed {
 
   constructor(config: ToolShedConfig) {
     this.projectRoot = path.resolve(config.projectRoot);
-    this.allowedPrefixes = config.allowedPrefixes
-      ? ['git ', ...config.allowedPrefixes.filter(p => p !== 'git ').map(p => p.endsWith(' ') ? p : p + ' ')]
-      : DEFAULT_ALLOWED_PREFIXES;
-    this.testCommand = config.testCommand ?? 'npm test';
+    if (config.allowedPrefixes) {
+      const normalized = config.allowedPrefixes.map(p => p.trim());
+      const withGit = ['git', ...normalized.filter(p => p !== 'git')];
+      this.allowedPrefixes = withGit.map(p => p + ' ');
+    } else {
+      this.allowedPrefixes = DEFAULT_ALLOWED_PREFIXES;
+    }
+    const testCmd = config.testCommand ?? 'npm test';
+    if (!/^[a-zA-Z0-9 _.\-\/=]+$/.test(testCmd)) {
+      throw new Error(`testCommand contains disallowed characters: "${testCmd}"`);
+    }
+    this.testCommand = testCmd;
     this.externalPathApprovalHandler = config.approvalHandler ?? (request => promptApproval(request.prompt));
   }
 
@@ -128,8 +136,12 @@ export class ToolShed {
   }
 
   private isWithinProjectRoot(candidatePath: string): boolean {
-    const normalizedRoot = path.resolve(this.projectRoot);
-    const normalizedCandidate = path.resolve(candidatePath);
+    let normalizedRoot = path.resolve(this.projectRoot);
+    let normalizedCandidate = path.resolve(candidatePath);
+    if (process.platform === 'win32') {
+      normalizedRoot = normalizedRoot.toLowerCase();
+      normalizedCandidate = normalizedCandidate.toLowerCase();
+    }
     return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(normalizedRoot + path.sep);
   }
 
@@ -315,6 +327,13 @@ export class ToolShed {
           }
 
           const effectiveCwd = path.resolve(cwd ?? this.projectRoot);
+          if (!this.isWithinProjectRoot(effectiveCwd)) {
+            return {
+              success: false,
+              output: '',
+              error: `cwd escapes project root: ${cwd}`,
+            };
+          }
           const pathCandidates = this.extractPathCandidates(command);
           for (const candidate of pathCandidates) {
             const resolvedCandidatePath = this.resolveCandidatePath(candidate, effectiveCwd);
