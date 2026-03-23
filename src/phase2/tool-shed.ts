@@ -82,14 +82,29 @@ function promptApproval(message: string): boolean {
   return normalized === 'y' || normalized === 'yes';
 }
 
+export interface ToolShedConfig {
+  projectRoot: string;
+  allowedPrefixes?: string[];
+  testCommand?: string;
+  approvalHandler?: ExternalPathApprovalHandler;
+}
+
+const DEFAULT_ALLOWED_PREFIXES = ['npm ', 'npx ', 'jest ', 'git ', 'node ', 'ts-node ', 'tsc '];
+
 export class ToolShed {
   private tools: Map<string, ToolSchema> = new Map();
   private projectRoot: string;
+  private allowedPrefixes: string[];
+  private testCommand: string;
   private externalPathApprovalHandler: ExternalPathApprovalHandler;
 
-  constructor(projectRoot?: string, approvalHandler?: ExternalPathApprovalHandler) {
-    this.projectRoot = projectRoot ? path.resolve(projectRoot) : path.resolve(process.cwd());
-    this.externalPathApprovalHandler = approvalHandler ?? (request => promptApproval(request.prompt));
+  constructor(config: ToolShedConfig) {
+    this.projectRoot = path.resolve(config.projectRoot);
+    this.allowedPrefixes = config.allowedPrefixes
+      ? ['git ', ...config.allowedPrefixes.filter(p => p !== 'git ').map(p => p.endsWith(' ') ? p : p + ' ')]
+      : DEFAULT_ALLOWED_PREFIXES;
+    this.testCommand = config.testCommand ?? 'npm test';
+    this.externalPathApprovalHandler = config.approvalHandler ?? (request => promptApproval(request.prompt));
   }
 
   private validatePath(filePath: string): string {
@@ -265,14 +280,13 @@ export class ToolShed {
         case 'bash_execute': {
           const command = params['command'] as string;
           const trimmedCommand = command.trim();
-          const allowedPrefixes = ['npm ', 'npx ', 'jest ', 'git ', 'node ', 'ts-node ', 'tsc '];
-          const isAllowed = allowedPrefixes.some(prefix => trimmedCommand.startsWith(prefix));
+          const isAllowed = this.allowedPrefixes.some(prefix => trimmedCommand.startsWith(prefix));
 
           if (!isAllowed) {
             return {
               success: false,
               output: '',
-              error: `Command not allowed. Allowed prefixes: ${allowedPrefixes.join(', ')}`,
+              error: `Command not allowed. Allowed prefixes: ${this.allowedPrefixes.join(', ')}`,
             };
           }
 
@@ -376,8 +390,8 @@ export class ToolShed {
 }
 
 /** Default tools that model a typical AI engineering environment */
-export function createDefaultToolShed(projectRoot?: string): ToolShed {
-  const shed = new ToolShed(projectRoot);
+export function createDefaultToolShed(config?: ToolShedConfig): ToolShed {
+  const shed = new ToolShed(config ?? { projectRoot: process.cwd() });
 
   shed.register({
     name: 'file_read',

@@ -189,7 +189,7 @@ async function main() {
   negativeKnowledge.loadFromDisk();
   console.log(`📚 Loaded ${negativeKnowledge.getAll().length} negative knowledge entries`);
 
-  const toolShed = createDefaultToolShed(ROOT_DIR);
+  const toolShed = createDefaultToolShed({ projectRoot: ROOT_DIR });
 
   const sop = new SOPEngine();
   const autoApproveCritical = process.env.EBA_AUTO_APPROVE_CRITICAL === 'true';

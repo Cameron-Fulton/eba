@@ -155,7 +155,7 @@ describe('executeWithToolLoop', () => {
       return { type: 'text', text: 'got the file' };
     });
 
-    const shed = createDefaultToolShed(tempDir);
+    const shed = createDefaultToolShed({ projectRoot: tempDir });
     const result = await orch.executeWithToolLoop('read this file', shed.getAll(), shed);
 
     expect(result.finalText).toBe('got the file');
@@ -271,7 +271,7 @@ describe('executeWithToolLoop', () => {
       return { type: 'text', text: 'unexpected' };
     });
 
-    const shed = createDefaultToolShed(tempDir);
+    const shed = createDefaultToolShed({ projectRoot: tempDir });
     const result = await orch.executeWithToolLoop('read approved', shed.getAll(), shed, default3PM);
 
     expect(result.finalText).toBe('read ok');
@@ -313,7 +313,7 @@ describe('executeWithToolLoop', () => {
       return { type: 'text', text: 'unexpected' };
     });
 
-    const shed = createDefaultToolShed(tempDir);
+    const shed = createDefaultToolShed({ projectRoot: tempDir });
     const result = await orch.executeWithToolLoop('read two files', shed.getAll(), shed);
 
     expect(result.toolCallsMade).toHaveLength(2);

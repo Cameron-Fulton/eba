@@ -9,7 +9,7 @@ describe('ToolShed.execute()', () => {
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-executor-'));
-    shed = createDefaultToolShed(tempDir);
+    shed = createDefaultToolShed({ projectRoot: tempDir });
   });
 
   afterEach(() => {

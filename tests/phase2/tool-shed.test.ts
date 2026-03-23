@@ -1,8 +1,8 @@
-import { ToolShed, ToolSchema, createDefaultToolShed } from '../../src/phase2/tool-shed';
+import { ToolShed, ToolSchema, ToolShedConfig, createDefaultToolShed } from '../../src/phase2/tool-shed';
 
 describe('Tool Shed', () => {
   test('registers and retrieves a tool', () => {
-    const shed = new ToolShed();
+    const shed = new ToolShed({ projectRoot: process.cwd() });
     const tool: ToolSchema = {
       name: 'my_tool',
       description: 'A test tool',
@@ -16,7 +16,7 @@ describe('Tool Shed', () => {
   });
 
   test('unregisters a tool', () => {
-    const shed = new ToolShed();
+    const shed = new ToolShed({ projectRoot: process.cwd() });
     shed.register({
       name: 'temp_tool',
       description: 'Temporary',
@@ -70,6 +70,16 @@ describe('Tool Shed', () => {
     const shed = createDefaultToolShed();
     const selected = shed.selectTools('xq zz qq', 3);
     expect(selected).toHaveLength(0);
+  });
+
+  test('accepts ToolShedConfig object', () => {
+    const shed = new ToolShed({ projectRoot: '/tmp/test-project' });
+    expect(shed).toBeDefined();
+  });
+
+  test('createDefaultToolShed accepts config object', () => {
+    const shed = createDefaultToolShed({ projectRoot: '/tmp/test-project' });
+    expect(shed.get('file_read')).toBeDefined();
   });
 
   test('default tool shed has expected tools', () => {
