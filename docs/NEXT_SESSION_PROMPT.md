@@ -2,42 +2,48 @@
 
 ## Quick Start
 ```
-Read memory/INDEX.md then load memory/mp-003-20260322-provider-hardening-merge-to-main.md
+Read memory/INDEX.md then load memory/mp-004-20260323-task-intake-and-target-aware-design.md
 ```
 
-## System State (as of 2026-03-22)
+## System State (as of 2026-03-23)
 - **Branch:** `main` (clean, all work merged)
-- **Tests:** 288 passing across 31 suites, 0 failures
+- **Tests:** 315 passing across 35 suites, 0 failures
 - **Typecheck:** Clean (tsc --noEmit passes)
-- **CVEs:** 0 vulnerabilities
-- **Lifecycle:** /audit + /harden both passed. gate-state.json is clean (currentStory: null)
+- **Lifecycle:** /harden passed for task-intake feature
 
 ## What Was Accomplished This Session
-1. Ran /audit — fixed context drift in project-summary.md, patterns-reference.md, CLAUDE.md (test counts, file counts, branch info, SOP count, diagrams all corrected)
-2. Implemented GeminiProvider callWithTools — all 4 providers now have full tool-calling support
-3. Updated .gitignore for test/lint artifacts and IDE files
-4. Merged `feat/multi-agent-architecture` (22 commits) to `main` via fast-forward
-5. Ran /harden — caught and fixed Gemini functionResponse.name bug (was using tool_call_id instead of function name), switched to crypto.randomUUID() for IDs
-6. Extracted solution to lifecycle/solutions.md, updated Gantt chart
+1. Diagnosed EBA's closed-loop problem — no external task entry point
+2. Built task intake system: CLI arg, file drop zone (`docs/task-intake/`), `/eba` skill
+3. Built context discovery: auto-reads SYSTEM.md/CLAUDE.md/AGENTS.md from target project
+4. Wired priority chain in run.ts: CLI arg > intake > orchestrator > fallback
+5. Added projectContext injection to PromptEnhancer (placed first for lost-in-the-middle mitigation)
+6. Security hardened: path traversal guards, CRLF normalization, TOCTOU race fix, Windows case sensitivity
+7. Ran /harden — CodeRabbit review found 2 critical + 3 high issues, all resolved
+8. Designed target-aware tool-shed spec — approved, ready for implementation
 
-## Architecture Summary
-- **4 phases:** Memory & Orchestration → SOPs & Threading → Validation & Safety → Optimization
-- **4 providers:** Claude, OpenAI, OpenRouter, Gemini — all with call() + callWithTools()
-- **Multi-agent:** SQLite task queue (WAL), MergeAgent, per-agent isolation (EBA_MULTI_AGENT=true)
-- **10 SOPs** including infrastructure_probe
-- **Security:** path containment, command allowlist, execFileSync, 3PM gating
+## What's Next
+**Implement the target-aware tool-shed** so EBA can read/write files in external projects.
 
-## What's Next (no active task — choose one)
-- **Live API integration testing** — callWithTools is unit-tested with mocks but not battle-tested against real Gemini/OpenAI/OpenRouter APIs
-- **Dependency upgrades** — jest 30, better-sqlite3 12, @types/node 25 are available (major bumps)
-- **Use EBA as a library** — the public API (src/index.ts) exports everything; ready to be consumed by another project
-- **Multi-agent live test** — run with EBA_MULTI_AGENT=true and multiple processes to test the task queue + merge agent under real concurrency
-- **New feature work** — the system is feature-complete for its current scope; any new work would extend its capabilities
+Spec: `docs/superpowers/specs/2026-03-23-target-aware-toolshed-design.md`
+
+Steps:
+1. Read the spec
+2. Write implementation plan (`/write-plan`)
+3. Execute with subagent-driven development
+
+## Key Decisions (settled — don't re-litigate)
+- Single tool-shed scope — target project only, no dual EBA+target access
+- `.eba/` dotfolder for artifacts in target project (solutions committed, logs/packets gitignored)
+- Command allowlist **replaces** defaults when `.eba.json` provides one; `git` always included
+- Separate NK stores (global + project), project-first search
+- Segment-based blocklist for accidental LLM destruction (not adversarial defense)
+- `grep_search`/`glob_find` must validate paths against projectRoot
+- `test_runner` delegates to configured command; filter param ignored for non-Jest
 
 ## Key Files
-- `src/run.ts` — CLI entry point with SOP auto-selection
-- `src/run-arena.ts` — Arena loop entry point
-- `src/index.ts` — Public API barrel export
-- `lifecycle/gate-state.json` — Lifecycle state tracker
-- `lifecycle/project-summary.md` — Full project summary with Mermaid diagrams
-- `lifecycle/solutions.md` — Curated solutions (8 entries)
+- `src/run.ts` — CLI entry point with priority chain
+- `src/pipeline/task-intake.ts` — File drop zone with priority sorting
+- `src/pipeline/context-discovery.ts` — Project context auto-reader
+- `src/phase2/tool-shed.ts` — Tool registry (needs target-aware refactor)
+- `docs/superpowers/specs/2026-03-23-target-aware-toolshed-design.md` — The spec to implement
+- `~/.claude/skills/eba/SKILL.md` — The /eba skill
