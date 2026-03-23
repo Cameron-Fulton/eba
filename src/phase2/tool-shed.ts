@@ -337,13 +337,27 @@ export class ToolShed {
         }
         case 'test_runner': {
           const filter = params['filter'] as string | undefined;
-          const args = ['jest', '--runInBand', '--forceExit'];
-          if (filter) {
-            args.push('--testNamePattern', filter);
+          const isJest = this.testCommand.includes('jest');
+
+          if (isJest) {
+            // Jest-specific: support filter parameter
+            const args = this.testCommand.split(/\s+/);
+            const cmd = args.shift()!;
+            if (filter) {
+              args.push('--testNamePattern', filter);
+            }
+            const out = execFileSync(cmd, args, {
+              cwd: this.projectRoot,
+              encoding: 'utf-8',
+              timeout: 120000,
+            });
+            return { success: true, output: out };
           }
 
-          const out = execFileSync('npx', args, {
-            cwd: cwd ?? process.cwd(),
+          // Custom command: run as-is via shell, ignore filter
+          // Note: command is pre-validated by SAFE_COMMAND regex in run.ts
+          const out = execSync(this.testCommand, {
+            cwd: this.projectRoot,
             encoding: 'utf-8',
             timeout: 120000,
           });

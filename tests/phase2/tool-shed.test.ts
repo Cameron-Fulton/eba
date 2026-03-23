@@ -218,3 +218,36 @@ describe('search tool path validation', () => {
     expect(result.error).toContain('escapes project root');
   });
 });
+
+describe('test_runner delegation', () => {
+  test('uses configured testCommand and produces its output', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-testcmd-'));
+    try {
+      const shed = createDefaultToolShed({
+        projectRoot: tempDir,
+        testCommand: 'echo custom-test-ran',
+      });
+      const result = shed.execute('test_runner', {});
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('custom-test-ran');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('ignores filter param when using custom testCommand', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-testfilter-'));
+    try {
+      const shed = createDefaultToolShed({
+        projectRoot: tempDir,
+        testCommand: 'echo no-filter-here',
+      });
+      const result = shed.execute('test_runner', { filter: 'someTest' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('no-filter-here');
+      expect(result.output).not.toContain('testNamePattern');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
