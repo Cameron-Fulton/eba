@@ -143,3 +143,39 @@ describe('command blocklist', () => {
     expect(result.error ?? '').not.toContain('blocked');
   });
 });
+
+describe('custom allowlist', () => {
+  test('replaces defaults when allowedPrefixes provided', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-allowlist-'));
+    try {
+      const shed = createDefaultToolShed({
+        projectRoot: tempDir,
+        allowedPrefixes: ['python', 'pytest', 'pip'],
+      });
+      // python should be allowed
+      const result = shed.execute('bash_execute', { command: 'python --version' });
+      expect(result.error ?? '').not.toContain('not allowed');
+
+      // npm should NOT be allowed (replaced by custom list)
+      const npmResult = shed.execute('bash_execute', { command: 'npm --version' });
+      expect(npmResult.success).toBe(false);
+      expect(npmResult.error).toContain('not allowed');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('git is always allowed even with custom allowlist', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-git-'));
+    try {
+      const shed = createDefaultToolShed({
+        projectRoot: tempDir,
+        allowedPrefixes: ['python'],
+      });
+      const result = shed.execute('bash_execute', { command: 'git status' });
+      expect(result.error ?? '').not.toContain('not allowed');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
