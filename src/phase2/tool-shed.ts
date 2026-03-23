@@ -8,6 +8,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, execSync } from 'child_process';
 
+const BLOCKED_COMMANDS = new Set([
+  'rm', 'rmdir', 'del', 'format', 'shutdown', 'reboot',
+  'mkfs', 'dd', 'killall', 'pkill',
+]);
+
+const SHELL_OPERATORS = /\s*(?:&&|\|\||;|\|)\s*/;
+
 function walkDir(dir: string, extensions?: string[]): string[] {
   const results: string[] = [];
   const exts = extensions ?? ['.ts', '.js', '.json', '.md'];
@@ -279,15 +286,32 @@ export class ToolShed {
         }
         case 'bash_execute': {
           const command = params['command'] as string;
-          const trimmedCommand = command.trim();
-          const isAllowed = this.allowedPrefixes.some(prefix => trimmedCommand.startsWith(prefix));
 
-          if (!isAllowed) {
-            return {
-              success: false,
-              output: '',
-              error: `Command not allowed. Allowed prefixes: ${this.allowedPrefixes.join(', ')}`,
-            };
+          const segments = command.split(SHELL_OPERATORS);
+          for (const segment of segments) {
+            const firstToken = segment.trim().split(/\s+/)[0];
+            if (!firstToken) continue;
+
+            // Blocklist check (always applies, immutable)
+            if (BLOCKED_COMMANDS.has(firstToken)) {
+              return {
+                success: false,
+                output: '',
+                error: `Command blocked: '${firstToken}' is in the blocklist. Blocked commands: ${[...BLOCKED_COMMANDS].join(', ')}`,
+              };
+            }
+
+            // Allowlist check — token must match an allowed prefix
+            const segmentAllowed = this.allowedPrefixes.some(prefix =>
+              firstToken === prefix.trim()
+            );
+            if (!segmentAllowed) {
+              return {
+                success: false,
+                output: '',
+                error: `Command not allowed. Allowed prefixes: ${this.allowedPrefixes.join(', ')}`,
+              };
+            }
           }
 
           const effectiveCwd = path.resolve(cwd ?? this.projectRoot);

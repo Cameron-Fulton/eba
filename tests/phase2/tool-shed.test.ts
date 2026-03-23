@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { ToolShed, ToolSchema, ToolShedConfig, createDefaultToolShed } from '../../src/phase2/tool-shed';
 
 describe('Tool Shed', () => {
@@ -90,5 +93,53 @@ describe('Tool Shed', () => {
     expect(shed.get('file_write')).toBeDefined();
     expect(shed.get('bash_execute')).toBeDefined();
     expect(shed.get('grep_search')).toBeDefined();
+  });
+});
+
+describe('command blocklist', () => {
+  let shed: ToolShed;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-blocklist-'));
+    shed = createDefaultToolShed({ projectRoot: tempDir });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('blocks rm in chained command', () => {
+    const result = shed.execute('bash_execute', { command: 'npm run build && rm -rf /' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('blocked');
+  });
+
+  test('blocks rmdir as standalone', () => {
+    const result = shed.execute('bash_execute', { command: 'rmdir /s /q C:\\' });
+    expect(result.success).toBe(false);
+  });
+
+  test('blocks dd in piped command', () => {
+    const result = shed.execute('bash_execute', { command: 'npm run dump | dd of=/dev/sda' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('blocked');
+  });
+
+  test('blocks killall after semicolon', () => {
+    const result = shed.execute('bash_execute', { command: 'git status ; killall node' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('blocked');
+  });
+
+  test('blocks del after || operator', () => {
+    const result = shed.execute('bash_execute', { command: 'npm run build || del /f /q *' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('blocked');
+  });
+
+  test('allows npm commands that are not blocklisted', () => {
+    const result = shed.execute('bash_execute', { command: 'npm --version' });
+    expect(result.error ?? '').not.toContain('blocked');
   });
 });
