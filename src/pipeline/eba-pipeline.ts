@@ -93,6 +93,8 @@ export interface EBAPipelineConfig {
   projectContext?: string;
   /** Target project directory (overrides ROOT_DIR for test runner cwd) */
   targetProjectDir?: string;
+  /** Project-specific NK store. When targeting external projects, new NK entries write here. */
+  projectNkStore?: NegativeKnowledgeStore;
 }
 
 export interface PipelineResult {
@@ -143,6 +145,7 @@ export class EBAPipeline {
       sop:               this.config.sop,
       toolShed:          this.config.toolShed,
       projectContext:    this.config.projectContext,
+      projectNegativeKnowledge: this.config.projectNkStore,
     });
 
     // Log pre-task state via 3PM
@@ -270,9 +273,10 @@ export class EBAPipeline {
 
     // 6. Record failed attempts to negative knowledge
     const failedLogs = logs.filter(l => l.status === 'failure');
+    const nkTarget = this.config.projectNkStore ?? this.negativeKnowledge;
     if (failedLogs.length > 0) {
       for (const log of failedLogs) {
-        this.negativeKnowledge.add({
+        nkTarget.add({
           scenario: activeTask.slice(0, 200),
           attempt:  log.llm_response.slice(0, 300),
           outcome:  log.test_result.output.slice(0, 300),
@@ -282,7 +286,7 @@ export class EBAPipeline {
           tags:     ['auto-recorded', this.config.sopId],
         });
       }
-      this.negativeKnowledge.saveToDisk();
+      nkTarget.saveToDisk();
       console.log(`\n💾 Recorded ${failedLogs.length} failure(s) to negative knowledge store`);
     }
 
