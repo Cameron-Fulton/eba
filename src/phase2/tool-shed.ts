@@ -351,9 +351,12 @@ export class ToolShed {
         }
         case 'grep_search': {
           const pattern = params['pattern'] as string;
-          const baseCwd = cwd ?? process.cwd();
+          const baseCwd = this.projectRoot;
           const requestedPath = (params['path'] as string | undefined) ?? '.';
           const searchRoot = path.isAbsolute(requestedPath) ? requestedPath : path.resolve(baseCwd, requestedPath);
+          if (!this.isWithinProjectRoot(searchRoot)) {
+            return { success: false, output: '', error: `Path escapes project root: ${requestedPath}` };
+          }
           const extensions = (params['extensions'] as string[] | undefined) ?? ['.ts', '.js', '.json', '.md'];
 
           const files = walkDir(searchRoot, extensions);
@@ -388,7 +391,13 @@ export class ToolShed {
         }
         case 'glob_find': {
           const pattern = params['pattern'] as string;
-          const baseCwd = cwd ?? process.cwd();
+          const requestedPath = (params['path'] as string | undefined);
+          const baseCwd = requestedPath
+            ? (path.isAbsolute(requestedPath) ? requestedPath : path.resolve(this.projectRoot, requestedPath))
+            : this.projectRoot;
+          if (!this.isWithinProjectRoot(baseCwd)) {
+            return { success: false, output: '', error: `Path escapes project root: ${requestedPath}` };
+          }
           const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
           const globRegex = new RegExp(`^${escaped}$`);
           const files = walkDir(baseCwd, []);

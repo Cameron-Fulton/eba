@@ -179,3 +179,42 @@ describe('custom allowlist', () => {
     }
   });
 });
+
+describe('search tool path validation', () => {
+  let tempDir: string;
+  let shed: ToolShed;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-search-'));
+    shed = createDefaultToolShed({ projectRoot: tempDir });
+    fs.writeFileSync(path.join(tempDir, 'hello.ts'), 'export const x = 1;');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('grep_search defaults to projectRoot, not cwd', () => {
+    const result = shed.execute('grep_search', { pattern: 'export' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('hello.ts');
+  });
+
+  test('grep_search rejects path outside projectRoot', () => {
+    const result = shed.execute('grep_search', { pattern: 'export', path: '/etc' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('escapes project root');
+  });
+
+  test('glob_find defaults to projectRoot, not cwd', () => {
+    const result = shed.execute('glob_find', { pattern: '*.ts' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('hello.ts');
+  });
+
+  test('glob_find rejects path outside projectRoot', () => {
+    const result = shed.execute('glob_find', { pattern: '*.ts', path: '/etc' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('escapes project root');
+  });
+});
