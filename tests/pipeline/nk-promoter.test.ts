@@ -194,6 +194,126 @@ describe('NKPromoter', () => {
     });
   });
 
+  describe('promote()', () => {
+    let tempIntakeDir: string;
+    let tempProjectDir: string;
+
+    beforeEach(() => {
+      tempIntakeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nk-intake-'));
+      tempProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nk-project-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tempIntakeDir, { recursive: true, force: true });
+      fs.rmSync(tempProjectDir, { recursive: true, force: true });
+    });
+
+    test('writes intake file for high-scoring entry', () => {
+      const promoter = new NKPromoter({
+        intakeDir: tempIntakeDir,
+        projectName: 'test-app',
+        projectRoot: tempProjectDir,
+      });
+      const entry = makeEntry({
+        tags: ['jest', 'typescript', 'auto-recorded'],
+        scenario: 'Jest test fails with ESM import error',
+        solution: 'Add transformIgnorePatterns to jest.config',
+      });
+      const count = promoter.promote([entry]);
+      expect(count).toBe(1);
+      const files = fs.readdirSync(tempIntakeDir).filter(f => f.endsWith('.md'));
+      expect(files).toHaveLength(1);
+      expect(files[0]).toContain('eba-nk-test-app');
+      const content = fs.readFileSync(path.join(tempIntakeDir, files[0]), 'utf-8');
+      expect(content).toContain('validated: false');
+      expect(content).toContain('votes: 0');
+    });
+
+    test('skips low-scoring entries', () => {
+      const promoter = new NKPromoter({
+        intakeDir: tempIntakeDir,
+        projectName: 'test-app',
+        projectRoot: tempProjectDir,
+      });
+      const entry = makeEntry({
+        tags: ['auto-recorded', 'refactoring'],
+        scenario: 'Error in D:\\projects\\myapp\\src\\userController.ts',
+        solution: 'Fixed /home/user/projects/myapp/src/userController.ts',
+      });
+      const count = promoter.promote([entry]);
+      expect(count).toBe(0);
+    });
+
+    test('deduplicates using promoted_ids.json ledger', () => {
+      const promoter = new NKPromoter({
+        intakeDir: tempIntakeDir,
+        projectName: 'test-app',
+        projectRoot: tempProjectDir,
+      });
+      const entry = makeEntry({
+        id: 'nk_dedup_test',
+        tags: ['jest', 'typescript', 'auto-recorded'],
+        scenario: 'Jest test fails with ESM import error',
+        solution: 'Add transformIgnorePatterns to jest.config',
+      });
+      expect(promoter.promote([entry])).toBe(1);
+      expect(promoter.promote([entry])).toBe(0);
+      const ledgerPath = path.join(tempProjectDir, '.eba', 'promoted_ids.json');
+      expect(fs.existsSync(ledgerPath)).toBe(true);
+      const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+      expect(ledger).toContain('nk_dedup_test');
+    });
+
+    test('handles missing intake directory gracefully', () => {
+      const promoter = new NKPromoter({
+        intakeDir: '/nonexistent/path/intake',
+        projectName: 'test-app',
+        projectRoot: tempProjectDir,
+      });
+      const entry = makeEntry({
+        tags: ['jest', 'typescript', 'auto-recorded'],
+        scenario: 'Jest test fails',
+        solution: 'Fix jest config',
+      });
+      expect(promoter.promote([entry])).toBe(0);
+    });
+
+    test('end-to-end: promotes high-scoring, skips low-scoring', () => {
+      const promoter = new NKPromoter({
+        intakeDir: tempIntakeDir,
+        projectName: 'integration-app',
+        projectRoot: tempProjectDir,
+      });
+      const entries = [
+        makeEntry({
+          id: 'nk_integ_001',
+          tags: ['jest', 'typescript', 'auto-recorded', 'refactoring'],
+          scenario: 'Jest test fails when importing ESM module',
+          solution: 'Add transformIgnorePatterns to jest.config',
+        }),
+        makeEntry({
+          id: 'nk_integ_002',
+          tags: ['auto-recorded', 'refactoring'],
+          scenario: 'Error in D:\\projects\\myapp\\src\\userController.ts',
+          solution: 'Fixed the file at D:\\projects\\myapp\\src\\userController.ts',
+        }),
+      ];
+      const count = promoter.promote(entries);
+      expect(count).toBe(1);
+      const files = fs.readdirSync(tempIntakeDir).filter(f => f.endsWith('.md'));
+      expect(files).toHaveLength(1);
+      const content = fs.readFileSync(path.join(tempIntakeDir, files[0]), 'utf-8');
+      expect(content).toContain('validated: false');
+      expect(content).toContain('votes: 0');
+      expect(content).toContain('unvalidated');
+      const ledger = JSON.parse(fs.readFileSync(
+        path.join(tempProjectDir, '.eba', 'promoted_ids.json'), 'utf-8'
+      ));
+      expect(ledger).toContain('nk_integ_001');
+      expect(ledger).not.toContain('nk_integ_002');
+    });
+  });
+
   describe('toIntakeMarkdown()', () => {
     test('produces valid frontmatter with validation fields', () => {
       const promoter = makePromoter({ projectName: 'my-app' });

@@ -187,7 +187,51 @@ export class NKPromoter {
   }
 
   promote(entries: NegativeKnowledgeEntry[]): number {
-    // Stub — implemented in Task 4
-    return 0;
+    if (!fs.existsSync(this.config.intakeDir)) return 0;
+
+    const ledgerPath = this.getLedgerPath();
+    const promotedIds = this.loadLedger(ledgerPath);
+    let count = 0;
+
+    for (const entry of entries) {
+      if (promotedIds.has(entry.id)) continue;
+      if (this.score(entry) < (this.config.threshold ?? 50)) continue;
+
+      const generalized = this.generalize(entry);
+      const markdown = this.toIntakeMarkdown(generalized, this.config.projectName);
+      const date = new Date().toISOString().slice(0, 10);
+      const idPrefix = entry.id.slice(0, 8);
+      const filename = `eba-nk-${this.config.projectName}-${date}-${idPrefix}.md`;
+
+      try {
+        fs.writeFileSync(path.join(this.config.intakeDir, filename), markdown, 'utf-8');
+        promotedIds.add(entry.id);
+        count++;
+      } catch { /* intake dir may have become unavailable */ }
+    }
+
+    if (count > 0) {
+      this.saveLedger(ledgerPath, promotedIds);
+    }
+    return count;
+  }
+
+  private getLedgerPath(): string {
+    return path.join(this.config.projectRoot, '.eba', 'promoted_ids.json');
+  }
+
+  private loadLedger(ledgerPath: string): Set<string> {
+    try {
+      const data = JSON.parse(fs.readFileSync(ledgerPath, 'utf-8'));
+      return new Set(Array.isArray(data) ? data : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  private saveLedger(ledgerPath: string, ids: Set<string>): void {
+    const dir = path.dirname(ledgerPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(ledgerPath, JSON.stringify([...ids], null, 2), 'utf-8');
   }
 }
