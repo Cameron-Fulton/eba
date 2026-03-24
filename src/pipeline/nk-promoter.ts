@@ -38,6 +38,14 @@ const SOP_TAG_PATTERN = /^(?:refactoring|bug-fix|feature|code-review|dependency-
 export class NKPromoter {
   private config: NKPromoterConfig;
 
+  private static readonly FRAMEWORK_FILES = new Set([
+    'page.tsx', 'layout.tsx', 'middleware.ts', 'docker-compose.yml',
+    'next.config.js', 'next.config.ts', 'next.config.mjs',
+    'tsconfig.json', 'jest.config.ts', 'jest.config.js',
+    'vite.config.ts', 'vite.config.js', 'package.json',
+    'Dockerfile', 'Makefile',
+  ]);
+
   constructor(config: NKPromoterConfig) {
     this.config = config;
   }
@@ -78,16 +86,73 @@ export class NKPromoter {
     return Math.max(0, Math.min(100, score));
   }
 
+  private stripPaths(text: string): string {
+    let result = text;
+    // Strip exact project root (escaped for regex)
+    const escaped = this.config.projectRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    result = result.replace(new RegExp(escaped + '[/\\\\][^\\s]*', 'gi'), '<project>/...');
+    // Strip common absolute path prefixes
+    result = result.replace(/(?:\/home\/\S+|\/Users\/\S+|[A-Z]:\\[^\s]+)/gi, '<project>/...');
+    return result;
+  }
+
+  private stripFilenames(text: string): string {
+    // Match path/to/specificFile.ext — preserve framework-convention files
+    let result = text.replace(/(?:[\w./\\-]+[/\\])([\w-]+\.[\w]{1,4})\b/g, (match, filename) => {
+      if (NKPromoter.FRAMEWORK_FILES.has(filename) || /^\.eslintrc/.test(filename)) {
+        return match; // preserve
+      }
+      const parts = match.split(/[/\\]/);
+      const dir = parts.length >= 2 ? parts[parts.length - 2] : '';
+      return dir ? `a file in ${dir}/` : 'a project file';
+    });
+    // Also strip standalone camelCase/multiWord filenames (no path prefix)
+    // Negative lookbehind for '.' avoids matching parts of dotted names like jest.config.ts
+    result = result.replace(/(?<!\.)(?<![/\\])\b(?:[a-z][a-zA-Z]+|[A-Z][a-z]+[A-Z]\w*)\.[a-z]{2,4}\b/g, (match) => {
+      if (NKPromoter.FRAMEWORK_FILES.has(match) || /^\.eslintrc/.test(match)) {
+        return match;
+      }
+      return 'a project file';
+    });
+    return result;
+  }
+
+  private stripStackTraces(text: string): string {
+    return text
+      .split('\n')
+      .filter(line => !/^\s*at\s+/.test(line))
+      .filter(line => !/:\d+:\d+\)?$/.test(line.trim()))
+      .join('\n')
+      .trim();
+  }
+
   generalize(entry: NegativeKnowledgeEntry): GeneralizedEntry {
-    // Stub — implemented in Task 2
-    return {
-      scenario: entry.scenario,
-      attempt: entry.attempt,
-      outcome: entry.outcome,
-      solution: entry.solution,
-      tags: [...entry.tags],
-      crossProjectReason: '',
-    };
+    const scenario = this.stripFilenames(this.stripPaths(entry.scenario));
+    const attempt = this.stripFilenames(this.stripPaths(entry.attempt));
+    const outcome = this.stripStackTraces(this.stripFilenames(this.stripPaths(entry.outcome)));
+    const solution = this.stripFilenames(this.stripPaths(entry.solution));
+
+    // Provenance tags
+    const date = new Date().toISOString().slice(0, 10);
+    const originalTags = entry.tags.filter(t => t !== 'auto-recorded');
+    const tags = [
+      ...originalTags,
+      'promoted',
+      'unvalidated',
+      'votes:0',
+      `source:${this.config.projectName}`,
+      `promoted:${date}`,
+    ];
+
+    // crossProjectReason: template from highest-scoring framework tag
+    const lowerTags = entry.tags.map(t => t.toLowerCase());
+    const frameworkTag = lowerTags.find(t => FRAMEWORK_TAGS.has(t));
+    const firstClause = scenario.split(/[.!?\n]/)[0]?.trim() || scenario.trim();
+    const crossProjectReason = frameworkTag
+      ? `Common ${frameworkTag} pattern: ${firstClause}`
+      : `Common development pattern: ${firstClause}`;
+
+    return { scenario, attempt, outcome, solution, tags, crossProjectReason };
   }
 
   toIntakeMarkdown(entry: GeneralizedEntry, projectName: string): string {

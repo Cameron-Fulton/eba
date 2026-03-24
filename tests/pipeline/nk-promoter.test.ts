@@ -96,4 +96,101 @@ describe('NKPromoter', () => {
       expect(score).toBeLessThan(50);
     });
   });
+
+  describe('generalize()', () => {
+    test('strips project-specific absolute paths', () => {
+      const promoter = makePromoter({ projectRoot: 'D:\\projects\\myapp' });
+      const entry = makeEntry({
+        scenario: 'Error in D:\\projects\\myapp\\src\\auth\\token.ts',
+        solution: 'Fixed D:\\projects\\myapp\\src\\auth\\token.ts',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.scenario).not.toContain('D:\\projects\\myapp');
+      expect(gen.solution).not.toContain('D:\\projects\\myapp');
+    });
+
+    test('strips unix absolute paths', () => {
+      const promoter = makePromoter({ projectRoot: '/home/user/myapp' });
+      const entry = makeEntry({
+        scenario: 'Error in /home/user/myapp/src/auth/token.ts',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.scenario).not.toContain('/home/user/myapp');
+    });
+
+    test('preserves framework-convention filenames', () => {
+      const promoter = makePromoter();
+      const entry = makeEntry({
+        scenario: 'Error in tsconfig.json when setting moduleResolution',
+        solution: 'Edit jest.config.ts to add transform',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.scenario).toContain('tsconfig.json');
+      expect(gen.solution).toContain('jest.config.ts');
+    });
+
+    test('strips camelCase specific filenames but keeps directory context', () => {
+      const promoter = makePromoter();
+      const entry = makeEntry({
+        scenario: 'src/controllers/userController.ts throws error',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.scenario).not.toContain('userController.ts');
+      expect(gen.scenario).toContain('controllers');
+    });
+
+    test('strips standalone camelCase filename without path prefix', () => {
+      const promoter = makePromoter();
+      const entry = makeEntry({
+        scenario: 'userController.ts throws TypeError',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.scenario).not.toContain('userController.ts');
+      expect(gen.scenario).toContain('throws TypeError');
+    });
+
+    test('strips stack traces', () => {
+      const promoter = makePromoter();
+      const entry = makeEntry({
+        outcome: 'Error: foo\n    at Object.<anonymous> (/test.js:5:1)\n    at Module._compile',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.outcome).toContain('Error: foo');
+      expect(gen.outcome).not.toContain('at Object.<anonymous>');
+      expect(gen.outcome).not.toContain('Module._compile');
+    });
+
+    test('adds provenance tags', () => {
+      const promoter = makePromoter({ projectName: 'my-app' });
+      const entry = makeEntry({ tags: ['jest', 'auto-recorded'] });
+      const gen = promoter.generalize(entry);
+      expect(gen.tags).toContain('promoted');
+      expect(gen.tags).toContain('unvalidated');
+      expect(gen.tags).toContain('votes:0');
+      expect(gen.tags.some(t => t.startsWith('source:'))).toBe(true);
+      expect(gen.tags.some(t => t.startsWith('promoted:'))).toBe(true);
+      // auto-recorded should be filtered out
+      expect(gen.tags).not.toContain('auto-recorded');
+    });
+
+    test('generates crossProjectReason from framework tag', () => {
+      const promoter = makePromoter();
+      const entry = makeEntry({
+        tags: ['jest', 'auto-recorded'],
+        scenario: 'Jest test fails with ESM import error',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.crossProjectReason).toContain('jest');
+    });
+
+    test('falls back to generic crossProjectReason when no framework tag', () => {
+      const promoter = makePromoter();
+      const entry = makeEntry({
+        tags: ['auto-recorded', 'refactoring'],
+        scenario: 'Something broke',
+      });
+      const gen = promoter.generalize(entry);
+      expect(gen.crossProjectReason).toContain('Common development pattern');
+    });
+  });
 });
