@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { NegativeKnowledgeStore } from '../../src/phase1/negative-knowledge';
+import { NegativeKnowledgeStore, parseNKMarkdown, VoteMetrics } from '../../src/phase1/negative-knowledge';
 
 describe('Negative Knowledge Store', () => {
   let store: NegativeKnowledgeStore;
@@ -136,5 +136,120 @@ describe('Negative Knowledge Store', () => {
     expect(md).toContain('## Attempt');
     expect(md).toContain('## Solution');
     expect(md).toContain('tag1, tag2');
+  });
+
+  test('toMarkdown includes Vote Metrics line when vote_metrics set', () => {
+    const entry = store.add({
+      scenario: 'Vote test',
+      attempt: 'a',
+      outcome: 'b',
+      solution: 'c',
+      tags: ['t1'],
+    });
+    entry.vote_metrics = {
+      contexts: {
+        jest: { successes: 2, total_attempts: 3 },
+        next: { successes: 1, total_attempts: 2 },
+        _default: { successes: 0, total_attempts: 0 },
+      },
+    };
+    const md = store.toMarkdown(entry);
+    expect(md).toContain('**Vote Metrics:** _default: 0/0, jest: 2/3, next: 1/2');
+  });
+
+  test('toMarkdown omits Vote Metrics line when vote_metrics undefined', () => {
+    const entry = store.add({
+      scenario: 'No votes',
+      attempt: 'a',
+      outcome: 'b',
+      solution: 'c',
+      tags: ['t1'],
+    });
+    const md = store.toMarkdown(entry);
+    expect(md).not.toContain('Vote Metrics');
+  });
+
+  test('parseNKMarkdown reads vote_metrics from markdown', () => {
+    const entry = store.add({
+      scenario: 'Parse test',
+      attempt: 'a',
+      outcome: 'b',
+      solution: 'c',
+      tags: ['t1'],
+    });
+    entry.vote_metrics = {
+      contexts: {
+        jest: { successes: 2, total_attempts: 3 },
+        next: { successes: 1, total_attempts: 2 },
+      },
+    };
+    const md = store.toMarkdown(entry);
+    const parsed = parseNKMarkdown(md, 'fallback');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.vote_metrics).toEqual({
+      contexts: {
+        jest: { successes: 2, total_attempts: 3 },
+        next: { successes: 1, total_attempts: 2 },
+      },
+    });
+  });
+
+  test('parseNKMarkdown returns undefined vote_metrics when line missing', () => {
+    const entry = store.add({
+      scenario: 'No vote line',
+      attempt: 'a',
+      outcome: 'b',
+      solution: 'c',
+      tags: ['t1'],
+    });
+    const md = store.toMarkdown(entry);
+    const parsed = parseNKMarkdown(md, 'fallback');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.vote_metrics).toBeUndefined();
+  });
+
+  test('round-trip: toMarkdown -> parseNKMarkdown preserves vote_metrics', () => {
+    const entry = store.add({
+      scenario: 'Round trip',
+      attempt: 'attempt text',
+      outcome: 'outcome text',
+      solution: 'solution text',
+      tags: ['jest', 'react'],
+    });
+    const vm: VoteMetrics = {
+      contexts: {
+        _default: { successes: 5, total_attempts: 10 },
+        jest: { successes: 3, total_attempts: 7 },
+        'jest+react': { successes: 1, total_attempts: 2 },
+      },
+    };
+    entry.vote_metrics = vm;
+    const md = store.toMarkdown(entry);
+    const parsed = parseNKMarkdown(md, 'fallback');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.vote_metrics).toEqual(vm);
+    expect(parsed!.scenario).toBe('Round trip');
+    expect(parsed!.tags).toEqual(['jest', 'react']);
+  });
+
+  test('update() preserves vote_metrics via spread', () => {
+    const entry = store.add({
+      scenario: 'Update test',
+      attempt: 'a',
+      outcome: 'b',
+      solution: 'c',
+      tags: ['t1'],
+    });
+    entry.vote_metrics = {
+      contexts: { jest: { successes: 1, total_attempts: 1 } },
+    };
+    // Re-set it in the store so update can find it with vote_metrics
+    (store as any).entries.set(entry.id, entry);
+    const updated = store.update(entry.id, { solution: 'new solution' });
+    expect(updated).toBeDefined();
+    expect(updated!.solution).toBe('new solution');
+    expect(updated!.vote_metrics).toEqual({
+      contexts: { jest: { successes: 1, total_attempts: 1 } },
+    });
   });
 });

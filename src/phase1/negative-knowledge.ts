@@ -9,6 +9,15 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { AIIndex } from './ai-index';
 
+export interface VoteContext {
+  successes: number;
+  total_attempts: number;
+}
+
+export interface VoteMetrics {
+  contexts: Record<string, VoteContext>;
+}
+
 export interface NegativeKnowledgeEntry {
   id: string;
   scenario: string;
@@ -17,6 +26,7 @@ export interface NegativeKnowledgeEntry {
   solution: string;
   tags: string[];
   timestamp: string;
+  vote_metrics?: VoteMetrics;
 }
 
 /** Parse a negative-knowledge markdown file into a structured entry. */
@@ -28,6 +38,22 @@ export function parseNKMarkdown(content: string, fallbackId: string): NegativeKn
   const idMatch = content.match(/\*\*ID:\*\* (.+)/);
   const dateMatch = content.match(/\*\*Date:\*\* (.+)/);
   const tagsMatch = content.match(/\*\*Tags:\*\* (.+)/);
+  const voteMatch = content.match(/\*\*Vote Metrics:\*\* (.+)/);
+
+  let vote_metrics: VoteMetrics | undefined;
+  if (voteMatch) {
+    const pairs = voteMatch[1].split(', ');
+    const contexts: Record<string, VoteContext> = {};
+    let valid = true;
+    for (const pair of pairs) {
+      const m = pair.match(/^(.+): (\d+)\/(\d+)$/);
+      if (!m) { valid = false; break; }
+      contexts[m[1]] = { successes: parseInt(m[2], 10), total_attempts: parseInt(m[3], 10) };
+    }
+    if (valid && Object.keys(contexts).length > 0) {
+      vote_metrics = { contexts };
+    }
+  }
 
   const attemptIdx = lines.findIndex(l => l === '## Attempt');
   const outcomeIdx = lines.findIndex(l => l === '## Outcome');
@@ -51,6 +77,7 @@ export function parseNKMarkdown(content: string, fallbackId: string): NegativeKn
     solution,
     tags: tagsMatch?.[1]?.split(', ').filter(Boolean) ?? [],
     timestamp: dateMatch?.[1] ?? new Date().toISOString(),
+    ...(vote_metrics ? { vote_metrics } : {}),
   };
 }
 
@@ -130,12 +157,25 @@ export class NegativeKnowledgeStore {
   }
 
   toMarkdown(entry: NegativeKnowledgeEntry): string {
-    return [
+    const lines = [
       `# ${entry.scenario}`,
       '',
       `**ID:** ${entry.id}`,
       `**Date:** ${entry.timestamp}`,
       `**Tags:** ${entry.tags.join(', ')}`,
+    ];
+
+    if (entry.vote_metrics) {
+      const parts = Object.keys(entry.vote_metrics.contexts)
+        .sort()
+        .map(key => {
+          const ctx = entry.vote_metrics!.contexts[key];
+          return `${key}: ${ctx.successes}/${ctx.total_attempts}`;
+        });
+      lines.push(`**Vote Metrics:** ${parts.join(', ')}`);
+    }
+
+    lines.push(
       '',
       '## Attempt',
       entry.attempt,
@@ -146,7 +186,9 @@ export class NegativeKnowledgeStore {
       '## Solution',
       entry.solution,
       '',
-    ].join('\n');
+    );
+
+    return lines.join('\n');
   }
 
   saveToDisk(): void {

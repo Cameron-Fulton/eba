@@ -7,18 +7,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { NegativeKnowledgeEntry, NegativeKnowledgeStore } from '../phase1/negative-knowledge';
+import { NegativeKnowledgeEntry, NegativeKnowledgeStore, VoteContext, VoteMetrics } from '../phase1/negative-knowledge';
 
-// ── Types ──────────────────────────────────────────────────
-
-export interface VoteContext {
-  successes: number;
-  total_attempts: number;
-}
-
-export interface VoteMetrics {
-  contexts: Record<string, VoteContext>;
-}
+export type { VoteMetrics, VoteContext } from '../phase1/negative-knowledge';
 
 export interface VoteReceipt {
   nk_id: string;
@@ -26,9 +17,6 @@ export interface VoteReceipt {
   succeeded: boolean;
   timestamp: string;
 }
-
-// Extended entry type for internal use until Task 5 adds vote_metrics to NegativeKnowledgeEntry
-type EntryWithVotes = NegativeKnowledgeEntry & { vote_metrics?: VoteMetrics };
 
 // ── Constants ──────────────────────────────────────────────
 
@@ -145,7 +133,7 @@ const MIN_ATTEMPTS_FOR_CONFIDENCE = 3;
  * compound key (>= 3 attempts) → best individual key (>= 3) → _default → 0
  */
 export function resolveWilsonScore(entry: NegativeKnowledgeEntry, contextKeys: string[]): number {
-  const metrics = (entry as EntryWithVotes).vote_metrics?.contexts;
+  const metrics = entry.vote_metrics?.contexts;
   if (!metrics) return 0;
 
   // Try compound key first (contains "+")
@@ -187,7 +175,7 @@ export function incrementVotes(
   contextKeys: string[],
   succeeded: boolean,
 ): NegativeKnowledgeEntry {
-  const src = entry as EntryWithVotes;
+  const src = entry;
 
   // Deep copy contexts
   const oldContexts = src.vote_metrics?.contexts ?? {};
@@ -210,7 +198,7 @@ export function incrementVotes(
   return {
     ...entry,
     vote_metrics: { contexts: newContexts },
-  } as NegativeKnowledgeEntry;
+  };
 }
 
 /**
@@ -270,7 +258,7 @@ export function applyVoteReceipts(
     }
 
     const updated = incrementVotes(entry, receipt.context_keys, receipt.succeeded);
-    store.update(entry.id, updated as any);
+    store.update(entry.id, updated);
     applied++;
   }
 
