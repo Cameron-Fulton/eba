@@ -51,7 +51,7 @@ Pipeline succeeds with recorded failures
   → NKPromoter.promote(newEntries)
     → For each entry:
       1. Score generalizability (tag heuristic + path density)
-      2. Check dedup: skip if intake already has file for same scenario
+      2. Check dedup: skip if entry ID is in .eba/promoted_ids.json
       3. If score >= threshold → generalize → tag unvalidated → write to intake
       4. If score < threshold → skip (stays project-only)
 ```
@@ -68,7 +68,9 @@ to the range 0-100 after summing all signals.
 - Solution field contains a general pattern (no absolute paths) (+20)
 - Scenario describes a common operation: "test", "build", "deploy", "import",
   "configure", "install", "migrate" (+15)
-- Entry has a successful solution (not "No successful solution found") (+15)
+- Solution or scenario references framework config files (`next.config`,
+  `tsconfig`, `jest.config`, `docker-compose`, `webpack.config`, `.eslintrc`,
+  `vite.config`, `package.json`) (+15)
 
 **Negative signals (subtract points):**
 - Scenario or solution contains absolute paths (`/home/`, `C:\`, `D:\`) (-20)
@@ -92,6 +94,11 @@ heuristics only** (no LLM calls — keeps the feature synchronous and free):
    `src/controllers/userController.ts` with the last directory name only
    (e.g., "a file in controllers/"). Regex: match path-like strings
    (containing `/` or `\` with a `.ext` suffix) and reduce to directory context.
+   **Preserve framework-convention filenames** that are part of the pattern:
+   `page.tsx`, `layout.tsx`, `middleware.ts`, `docker-compose.yml`,
+   `next.config.js`, `tsconfig.json`, `jest.config.ts`, `vite.config.ts`,
+   `.eslintrc.*`, `package.json`, `Dockerfile`, `Makefile`. These are kept
+   verbatim because they identify the framework pattern, not the project.
 3. **Strip stack traces:** Remove lines matching common stack trace patterns
    (`at Object.<anonymous>`, `at Module._compile`, line:col references).
 4. **Preserve the pattern:** The scenario, attempt, outcome, and solution
@@ -172,15 +179,17 @@ The librarian picks these up on its regular scan, processes them into
 
 ### Deduplication
 
-Before writing an intake file, `promote()` checks whether a file matching the
-same project + scenario already exists in the intake directory. The check
-is a filename-prefix scan: look for files starting with
-`eba-nk-{projectName}-` and read their `## ` header line. If the generalized
-scenario matches an existing file (case-insensitive), skip the write.
+Each project maintains a lightweight dedup ledger at
+`{project}/.eba/promoted_ids.json` — a JSON array of NK entry IDs that have
+already been promoted. Before writing an intake file, `promote()` checks
+whether the entry's ID is in this list. After a successful write, the ID is
+appended and the file is saved.
 
-This prevents the same failure from generating duplicate intake files across
-repeated pipeline runs. Cross-project deduplication (two projects discovering
-the same pattern) is left to the librarian.
+This approach is immune to the race condition where the librarian moves files
+out of the intake directory before `promote()` checks for duplicates. The
+ledger lives in the project's own `.eba/` directory, which the librarian
+never touches. Cross-project deduplication (two projects discovering the same
+pattern) is left to the librarian.
 
 ### NKPromoter class
 
