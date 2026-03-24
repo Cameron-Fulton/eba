@@ -15,6 +15,8 @@ export interface GeneralizedEntry {
   outcome: string;
   solution: string;
   tags: string[];
+  /** Original tags before provenance was added (for display in intake file) */
+  originalTags: string[];
   crossProjectReason: string;
 }
 
@@ -32,7 +34,8 @@ const CONFIG_FILES = [
 ];
 
 const ABSOLUTE_PATH_PATTERN = /(?:\/home\/|\/Users\/|[A-Z]:\\)/i;
-const SPECIFIC_FILENAME_PATTERN = /(?:[a-z][a-zA-Z]+|[A-Z][a-z]+[A-Z])\.[a-z]{2,4}\b/;
+const FILE_EXTENSIONS = new Set(['ts', 'js', 'tsx', 'jsx', 'py', 'go', 'rs', 'json', 'yml', 'yaml', 'md', 'html', 'css', 'scss', 'vue', 'svelte']);
+const SPECIFIC_FILENAME_PATTERN = /(?:[a-z][a-zA-Z]+|[A-Z][a-z]+[A-Z]\w*)\.(ts|js|tsx|jsx|py|go|rs|json|yml|yaml|md|html|css|scss|vue|svelte)\b/;
 const SOP_TAG_PATTERN = /^(?:refactoring|bug-fix|feature|code-review|dependency-upgrade|deployment|database-migration|documentation|security-audit|performance-optimization|infrastructure-probe)$/;
 
 export class NKPromoter {
@@ -98,7 +101,7 @@ export class NKPromoter {
 
   private stripFilenames(text: string): string {
     // Match path/to/specificFile.ext — preserve framework-convention files
-    let result = text.replace(/(?:[\w./\\-]+[/\\])([\w-]+\.[\w]{1,4})\b/g, (match, filename) => {
+    let result = text.replace(/(?:[\w./\\-]+[/\\])([\w.-]+\.[\w]{1,4})\b/g, (match, filename) => {
       if (NKPromoter.FRAMEWORK_FILES.has(filename) || /^\.eslintrc/.test(filename)) {
         return match; // preserve
       }
@@ -152,7 +155,7 @@ export class NKPromoter {
       ? `Common ${frameworkTag} pattern: ${firstClause}`
       : `Common development pattern: ${firstClause}`;
 
-    return { scenario, attempt, outcome, solution, tags, crossProjectReason };
+    return { scenario, attempt, outcome, solution, tags, originalTags: [...entry.tags], crossProjectReason };
   }
 
   toIntakeMarkdown(entry: GeneralizedEntry, projectName: string): string {
@@ -180,7 +183,7 @@ export class NKPromoter {
       '### What Works',
       entry.solution,
       '',
-      `**Original tags:** ${entry.tags.join(', ')}`,
+      `**Original tags:** ${entry.originalTags.join(', ')}`,
       `**Promoted from:** ${projectName}`,
       '',
     ].join('\n');
@@ -200,11 +203,14 @@ export class NKPromoter {
       const generalized = this.generalize(entry);
       const markdown = this.toIntakeMarkdown(generalized, this.config.projectName);
       const date = new Date().toISOString().slice(0, 10);
-      const idPrefix = entry.id.slice(0, 8);
-      const filename = `eba-nk-${this.config.projectName}-${date}-${idPrefix}.md`;
+      const idPrefix = entry.id.slice(0, 8) || 'unknown';
+      const safeName = this.config.projectName.replace(/[/\\:*?"<>|]/g, '_');
+      const filename = `eba-nk-${safeName}-${date}-${idPrefix}.md`;
 
       try {
-        fs.writeFileSync(path.join(this.config.intakeDir, filename), markdown, 'utf-8');
+        const writePath = path.resolve(this.config.intakeDir, filename);
+        if (!writePath.startsWith(path.resolve(this.config.intakeDir))) continue;
+        fs.writeFileSync(writePath, markdown, 'utf-8');
         promotedIds.add(entry.id);
         count++;
       } catch { /* intake dir may have become unavailable */ }

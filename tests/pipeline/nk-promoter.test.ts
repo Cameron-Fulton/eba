@@ -305,7 +305,6 @@ describe('NKPromoter', () => {
       const content = fs.readFileSync(path.join(tempIntakeDir, files[0]), 'utf-8');
       expect(content).toContain('validated: false');
       expect(content).toContain('votes: 0');
-      expect(content).toContain('unvalidated');
       const ledger = JSON.parse(fs.readFileSync(
         path.join(tempProjectDir, '.eba', 'promoted_ids.json'), 'utf-8'
       ));
@@ -323,6 +322,7 @@ describe('NKPromoter', () => {
         outcome: 'ESM breaks mock hoisting',
         solution: 'Add transformIgnorePatterns',
         tags: ['jest', 'promoted', 'unvalidated', 'votes:0'],
+        originalTags: ['jest', 'auto-recorded'],
         crossProjectReason: 'Common jest pattern: Jest test fails with ESM error',
       };
       const md = promoter.toIntakeMarkdown(gen, 'my-app');
@@ -341,6 +341,7 @@ describe('NKPromoter', () => {
         outcome: 'Test outcome',
         solution: 'Test solution',
         tags: ['promoted'],
+        originalTags: ['auto-recorded'],
         crossProjectReason: 'Common pattern',
       };
       const md = promoter.toIntakeMarkdown(gen, 'test-project');
