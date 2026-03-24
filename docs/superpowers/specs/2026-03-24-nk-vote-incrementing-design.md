@@ -250,13 +250,15 @@ In `sweep()` (not `mergePackets()`):
 
 `mergePackets()` remains a pure, deterministic function: takes packets in, returns one merged packet out. It **unions** all `vote_receipts` arrays from input packets into the merged output (simple array concatenation, deduplicated by `nk_id + context_keys` composite). This preserves receipts through merge operations. All I/O (NK store load, vote increment, disk save, receipt stripping) lives in the async `sweep()` wrapper.
 
+**When does the union path fire?** In the normal sweep flow, receipts are stripped before `mergePackets()` runs, so the union logic sees `undefined` arrays and is a no-op. The union path exists for crash recovery: if a previous `sweep()` crashed after loading packets but before stripping receipts, an already-merged master packet in `pendingDir` may still carry `vote_receipts`. On the next `sweep()`, that master packet is loaded alongside new pending packets and fed to `mergePackets()` — the union preserves those unprocessed receipts so they aren't lost. Without this, a crash between load and strip would silently drop votes.
+
 ### sweep() vote processing order
 
 `sweep()` must process vote receipts **before** calling `mergePackets()`. Sequence:
-1. Load pending packets
-2. Collect all `vote_receipts` from pending packets
+1. Load pending packets (including any existing master packet that may carry unprocessed receipts from a crash)
+2. Collect all `vote_receipts` from all loaded packets
 3. Load global NK store, apply votes via `applyVoteReceipts()`, save store
-4. Strip `vote_receipts` from each pending packet (set to `undefined`)
+4. Strip `vote_receipts` from each packet (set to `undefined`)
 5. Call `mergePackets()` on the stripped packets — merged output has no receipts
 
 ### applyVoteReceipts error handling
@@ -278,13 +280,13 @@ If the Merge Agent isn't running, receipts persist in the memory packet JSON fil
 - `detectFrameworks(projectDir)` — package.json scanning
 - `wilsonScore(successes, total, z?)` — Wilson Score Lower Bound
 - `incrementVotes(entry, contextKeys, succeeded)` — pure function, returns updated entry
-- `createVoteReceipts(entries: NegativeKnowledgeEntry[], projectDir: string, succeeded: boolean): VoteReceipt[]` — convenience for pipeline. Calls `detectFrameworks(projectDir)`, then for each unique entry (deduplicated by `id`), calls `buildContextKeys()` with the entry's framework tags and produces a `VoteReceipt`. Returns `[]` if `entries` is empty or `projectDir` is invalid.
+- `createVoteReceipts(entries: NegativeKnowledgeEntry[], projectDir: string, succeeded: boolean): VoteReceipt[]` — convenience for pipeline. Calls `detectFrameworks(projectDir)`, then for each unique entry (deduplicated by `id`), calls `buildContextKeys()` with the entry's framework tags and produces a `VoteReceipt`. Returns `[]` if `entries` is empty. If `projectDir` doesn't contain a `package.json`, `detectFrameworks()` returns `[]` internally and context keys fall back to task tags only (or `_default` if none). No separate "invalid dir" guard — `detectFrameworks()` absorbs all filesystem errors.
 - `applyVoteReceipts(nkStore, receipts)` — for merge agent's sweep()
 
 ## Modified Files
 
 - `src/phase1/negative-knowledge.ts` — Add `vote_metrics?: VoteMetrics` to entry interface. `toMarkdown()`: emit `**Vote Metrics:** key: s/t, ...` line after Tags. `parseNKMarkdown()`: parse with regex `/\*\*Vote Metrics:\*\* (.+)/` (same pattern as Tags), then split on `, ` and parse each `key: s/t` pair with `/^(.+): (\d+)\/(\d+)$/`. If the line is missing or malformed, `vote_metrics` is `undefined` (backward-compatible)
-- `src/phase1/memory-packet.ts` — Add `vote_receipts?: VoteReceipt[]` to MemoryPacket interface. Validation rule: `if (p.vote_receipts !== undefined) { if (!Array.isArray(p.vote_receipts)) errors.push(...) }` — array-check only, no deep validation of inner VoteReceipt fields (receipts are ephemeral and stripped by sweep)
+- `src/phase1/memory-packet.ts` — Add `vote_receipts?: VoteReceipt[]` to MemoryPacket interface. Import `VoteReceipt` from `nk-vote-tracker.ts` (one-way dependency: memory-packet → nk-vote-tracker; nk-vote-tracker does NOT import from memory-packet, preventing circular deps). Validation rule: `if (p.vote_receipts !== undefined) { if (!Array.isArray(p.vote_receipts)) errors.push(...) }` — array-check only, no deep validation of inner VoteReceipt fields (receipts are ephemeral and stripped by sweep)
 - `src/pipeline/prompt-enhancer.ts` — Track injected NK entries, expose getter/clear
 - `src/pipeline/eba-pipeline.ts` — Build vote receipts post-task, attach to memory packet
 - `src/pipeline/nk-promoter.ts` — Initialize `vote_metrics: { contexts: { "_default": { successes: 0, total_attempts: 0 } } }` on promoted entries. Remove `votes:0` from generated tags. Import `FRAMEWORK_TAGS` from `nk-vote-tracker.ts` instead of defining locally.
