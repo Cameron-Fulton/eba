@@ -24,7 +24,7 @@ import { randomUUID } from 'crypto';
 
 import { LLMProvider }              from '../phase1/orchestrator';
 import { BlueprintOrchestrator, OrchestratorConfig, ExecutionLog } from '../phase1/orchestrator';
-import { NegativeKnowledgeStore }   from '../phase1/negative-knowledge';
+import { NegativeKnowledgeStore, NegativeKnowledgeEntry } from '../phase1/negative-knowledge';
 import { CompressionAgent }         from '../phase1/compression-agent';
 import { ToolShed }                 from '../phase2/tool-shed';
 import { SOPEngine }                from '../phase2/sop';
@@ -35,6 +35,7 @@ import { ThreePillarModel }         from '../phase3/three-pillar-model';
 import { VisualProofSystem, ProofContext } from '../phase3/visual-proof';
 import { PromptEnhancer }           from './prompt-enhancer';
 import { ProjectOrchestrator }      from './project-orchestrator';
+import { NKPromoter }               from './nk-promoter';
 
 export interface EBAPipelineConfig {
   /** Directory containing ACTIVE_TASK.md, PROJECT.md */
@@ -95,6 +96,8 @@ export interface EBAPipelineConfig {
   targetProjectDir?: string;
   /** Project-specific NK store. When targeting external projects, new NK entries write here. */
   projectNkStore?: NegativeKnowledgeStore;
+  /** NK promoter for project-to-global knowledge propagation */
+  nkPromoter?: NKPromoter;
 }
 
 export interface PipelineResult {
@@ -274,9 +277,10 @@ export class EBAPipeline {
     // 6. Record failed attempts to negative knowledge
     const failedLogs = logs.filter(l => l.status === 'failure');
     const nkTarget = this.config.projectNkStore ?? this.negativeKnowledge;
+    const newNkEntries: NegativeKnowledgeEntry[] = [];
     if (failedLogs.length > 0) {
       for (const log of failedLogs) {
-        nkTarget.add({
+        const entry = nkTarget.add({
           scenario: activeTask.slice(0, 200),
           attempt:  log.llm_response.slice(0, 300),
           outcome:  log.test_result.output.slice(0, 300),
@@ -285,9 +289,22 @@ export class EBAPipeline {
             : 'No successful solution found in this session',
           tags:     ['auto-recorded', this.config.sopId],
         });
+        newNkEntries.push(entry);
       }
       nkTarget.saveToDisk();
       console.log(`\n💾 Recorded ${failedLogs.length} failure(s) to negative knowledge store`);
+    }
+
+    // Promote qualifying NK entries to global store via librarian intake
+    if (succeeded && failedLogs.length > 0 && this.config.projectNkStore && this.config.nkPromoter) {
+      try {
+        const promoted = this.config.nkPromoter.promote(newNkEntries);
+        if (promoted > 0) {
+          console.log(`📤 Promoted ${promoted} NK entr${promoted === 1 ? 'y' : 'ies'} to global knowledge`);
+        }
+      } catch (err) {
+        console.warn('NK promotion failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      }
     }
 
     // 7. Compress session into memory packet
