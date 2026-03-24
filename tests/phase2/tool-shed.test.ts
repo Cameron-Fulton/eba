@@ -251,3 +251,72 @@ describe('test_runner delegation', () => {
     }
   });
 });
+
+describe('security guards', () => {
+  test('constructor rejects testCommand with unsafe characters', () => {
+    expect(() => new ToolShed({
+      projectRoot: process.cwd(),
+      testCommand: 'npm test; rm -rf /',
+    })).toThrow('disallowed characters');
+  });
+
+  test('bash_execute blocks subshell expansion with $()', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-subshell-'));
+    try {
+      const shed = createDefaultToolShed({ projectRoot: tempDir });
+      const result = shed.execute('bash_execute', { command: 'npm test $(echo evil)' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('subshell');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('bash_execute blocks backtick execution', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-backtick-'));
+    try {
+      const shed = createDefaultToolShed({ projectRoot: tempDir });
+      const result = shed.execute('bash_execute', { command: 'npm test `echo evil`' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('subshell');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('bash_execute blocks embedded newlines', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-newline-'));
+    try {
+      const shed = createDefaultToolShed({ projectRoot: tempDir });
+      const result = shed.execute('bash_execute', { command: 'npm test\nrm -rf /' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('subshell');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('bash_execute rejects cwd outside project root', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-cwd-'));
+    try {
+      const shed = createDefaultToolShed({ projectRoot: tempDir });
+      const result = shed.execute('bash_execute', { command: 'git status' }, '/etc');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('cwd escapes project root');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('blocklist catches absolute path to blocked command', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-pathblock-'));
+    try {
+      const shed = createDefaultToolShed({ projectRoot: tempDir });
+      const result = shed.execute('bash_execute', { command: '/bin/rm -rf /' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('blocked');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
