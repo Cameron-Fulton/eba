@@ -98,6 +98,11 @@ heuristics only** (no LLM calls — keeps the feature synchronous and free):
    text survive generalization — only paths, filenames, and traces are stripped.
 5. **Add provenance tags:** `promoted`, `unvalidated`, `votes:0`,
    `source:{projectName}`, `promoted:{YYYY-MM-DD}`
+6. **Generate crossProjectReason:** Template-based: `"Common {tool/framework}
+   pattern: {first clause of generalized scenario}"`. Extract the tool name
+   from the highest-scoring framework tag. If no framework tag matched, use
+   `"Common development pattern"` as fallback. This is a display hint for
+   the librarian intake, not a precise description.
 
 Example transformation:
 
