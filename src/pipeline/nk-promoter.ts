@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { NegativeKnowledgeEntry } from '../phase1/negative-knowledge';
+import { NegativeKnowledgeEntry, VoteMetrics } from '../phase1/negative-knowledge';
+import { FRAMEWORK_TAGS } from './nk-vote-tracker';
 
 export interface NKPromoterConfig {
   intakeDir: string;
@@ -18,13 +19,8 @@ export interface GeneralizedEntry {
   /** Original tags before provenance was added (for display in intake file) */
   originalTags: string[];
   crossProjectReason: string;
+  vote_metrics: VoteMetrics;
 }
-
-const FRAMEWORK_TAGS = new Set([
-  'jest', 'typescript', 'react', 'node', 'webpack', 'prisma', 'docker',
-  'git', 'eslint', 'api', 'auth', 'oauth', 'cors', 'websocket',
-  'database', 'migration', 'cache',
-]);
 
 const COMMON_OPERATIONS = ['test', 'build', 'deploy', 'import', 'configure', 'install', 'migrate'];
 
@@ -141,7 +137,6 @@ export class NKPromoter {
       ...originalTags,
       'promoted',
       'unvalidated',
-      'votes:0',
       `source:${this.config.projectName}`,
       `promoted:${date}`,
     ];
@@ -154,7 +149,11 @@ export class NKPromoter {
       ? `Common ${frameworkTag} pattern: ${firstClause}`
       : `Common development pattern: ${firstClause}`;
 
-    return { scenario, attempt, outcome, solution, tags, originalTags: [...entry.tags], crossProjectReason };
+    return {
+      scenario, attempt, outcome, solution, tags,
+      originalTags: [...entry.tags], crossProjectReason,
+      vote_metrics: { contexts: { _default: { successes: 0, total_attempts: 0 } } },
+    };
   }
 
   toIntakeMarkdown(entry: GeneralizedEntry, projectName: string): string {

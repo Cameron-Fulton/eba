@@ -166,7 +166,7 @@ describe('NKPromoter', () => {
       const gen = promoter.generalize(entry);
       expect(gen.tags).toContain('promoted');
       expect(gen.tags).toContain('unvalidated');
-      expect(gen.tags).toContain('votes:0');
+      expect(gen.tags).not.toContain('votes:0');
       expect(gen.tags.some(t => t.startsWith('source:'))).toBe(true);
       expect(gen.tags.some(t => t.startsWith('promoted:'))).toBe(true);
       // auto-recorded should be filtered out
@@ -181,6 +181,24 @@ describe('NKPromoter', () => {
       });
       const gen = promoter.generalize(entry);
       expect(gen.crossProjectReason).toContain('jest');
+    });
+
+    it('generalize() does not include votes:0 in tags', () => {
+      const promoter = makePromoter({ projectName: 'test' });
+      const entry = makeEntry({ tags: ['jest', 'auto-recorded'] });
+      const gen = promoter.generalize(entry);
+      expect(gen.tags).not.toContain('votes:0');
+      expect(gen.tags).toContain('promoted');
+      expect(gen.tags).toContain('unvalidated');
+    });
+
+    it('generalize() initializes vote_metrics with _default context', () => {
+      const promoter = makePromoter({ projectName: 'test' });
+      const entry = makeEntry({ tags: ['jest', 'auto-recorded'] });
+      const gen = promoter.generalize(entry);
+      expect(gen.vote_metrics).toEqual({
+        contexts: { _default: { successes: 0, total_attempts: 0 } },
+      });
     });
 
     test('falls back to generic crossProjectReason when no framework tag', () => {
@@ -321,9 +339,10 @@ describe('NKPromoter', () => {
         attempt: 'Used jest.mock()',
         outcome: 'ESM breaks mock hoisting',
         solution: 'Add transformIgnorePatterns',
-        tags: ['jest', 'promoted', 'unvalidated', 'votes:0'],
+        tags: ['jest', 'promoted', 'unvalidated'],
         originalTags: ['jest', 'auto-recorded'],
         crossProjectReason: 'Common jest pattern: Jest test fails with ESM error',
+        vote_metrics: { contexts: { _default: { successes: 0, total_attempts: 0 } } },
       };
       const md = promoter.toIntakeMarkdown(gen, 'my-app');
       expect(md).toContain('source: eba-nk-promotion');
@@ -343,6 +362,7 @@ describe('NKPromoter', () => {
         tags: ['promoted'],
         originalTags: ['auto-recorded'],
         crossProjectReason: 'Common pattern',
+        vote_metrics: { contexts: { _default: { successes: 0, total_attempts: 0 } } },
       };
       const md = promoter.toIntakeMarkdown(gen, 'test-project');
       expect(md).toContain('## Test scenario');
