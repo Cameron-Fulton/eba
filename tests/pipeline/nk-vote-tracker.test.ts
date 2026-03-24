@@ -99,16 +99,17 @@ describe('buildContextKeys', () => {
     expect(individual).toEqual([...individual].sort());
   });
 
-  test('produces compound key with tiering — tier1 + tier2 only', () => {
+  test('no compound key when taskTags is empty — tier2 requires taskTags', () => {
     const keys = buildContextKeys(['react', 'prisma', 'jest', 'typescript'], []);
     const compound = keys.filter(k => k.includes('+'));
-    expect(compound.length).toBe(1);
-    // Should include react (tier1) + prisma (tier2), NOT jest/typescript (tier3)
-    expect(compound[0]).toBe('prisma+react');
+    // Empty taskTags means no tier2 tags; only tier1 (react) enters compoundParts
+    // which is < 2, so no compound key forms
+    expect(compound.length).toBe(0);
   });
 
   test('compound key includes max 1 tier1 framework', () => {
-    const keys = buildContextKeys(['react', 'next', 'prisma'], []);
+    // tier2 must come from taskTags
+    const keys = buildContextKeys(['react', 'next'], ['prisma']);
     const compound = keys.filter(k => k.includes('+'));
     expect(compound.length).toBe(1);
     const parts = compound[0].split('+');
@@ -117,9 +118,10 @@ describe('buildContextKeys', () => {
   });
 
   test('compound key caps at 4 tags', () => {
+    // tier2 must come from taskTags
     const keys = buildContextKeys(
-      ['react', 'prisma', 'database', 'auth', 'oauth', 'cache', 'docker'],
-      []
+      ['react'],
+      ['prisma', 'database', 'auth', 'oauth', 'cache', 'docker']
     );
     const compound = keys.filter(k => k.includes('+'));
     if (compound.length > 0) {
@@ -151,7 +153,8 @@ describe('buildContextKeys', () => {
   });
 
   test('compound key is sorted alphabetically', () => {
-    const keys = buildContextKeys(['react', 'prisma', 'auth'], []);
+    // tier2 must come from taskTags
+    const keys = buildContextKeys(['react'], ['prisma', 'auth']);
     const compound = keys.filter(k => k.includes('+'));
     if (compound.length > 0) {
       const parts = compound[0].split('+');

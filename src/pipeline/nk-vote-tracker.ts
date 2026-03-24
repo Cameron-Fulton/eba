@@ -68,7 +68,7 @@ export function buildContextKeys(projectFrameworks: string[], taskTags: string[]
   // tier1: max 1 from taskTags or projectFrameworks
   // tier2: from taskTags primarily
   const tier1Tags = unique.filter(t => TIER_1_FRAMEWORKS.has(t));
-  const tier2Tags = unique.filter(t => TIER_2_INTEGRATIONS.has(t));
+  const tier2Tags = taskTags.map(t => t.toLowerCase()).filter(t => TIER_2_INTEGRATIONS.has(t));
 
   const compoundParts: string[] = [];
 
