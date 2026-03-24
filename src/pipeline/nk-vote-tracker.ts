@@ -145,7 +145,7 @@ export function resolveWilsonScore(entry: NegativeKnowledgeEntry, contextKeys: s
   }
   if (bestScore >= 0) return bestScore;
 
-  // Fallback to _default
+  // _default has no minimum-attempts gate per spec — it's the last resort before returning 0
   const defaultCtx = metrics['_default'];
   if (defaultCtx) {
     return wilsonScore(defaultCtx.successes, defaultCtx.total_attempts);
