@@ -1,4 +1,4 @@
-import { NKPromoter, NKPromoterConfig } from '../../src/pipeline/nk-promoter';
+import { NKPromoter, NKPromoterConfig, GeneralizedEntry } from '../../src/pipeline/nk-promoter';
 import { NegativeKnowledgeEntry } from '../../src/phase1/negative-knowledge';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -191,6 +191,47 @@ describe('NKPromoter', () => {
       });
       const gen = promoter.generalize(entry);
       expect(gen.crossProjectReason).toContain('Common development pattern');
+    });
+  });
+
+  describe('toIntakeMarkdown()', () => {
+    test('produces valid frontmatter with validation fields', () => {
+      const promoter = makePromoter({ projectName: 'my-app' });
+      const gen: GeneralizedEntry = {
+        scenario: 'Jest test fails with ESM error',
+        attempt: 'Used jest.mock()',
+        outcome: 'ESM breaks mock hoisting',
+        solution: 'Add transformIgnorePatterns',
+        tags: ['jest', 'promoted', 'unvalidated', 'votes:0'],
+        crossProjectReason: 'Common jest pattern: Jest test fails with ESM error',
+      };
+      const md = promoter.toIntakeMarkdown(gen, 'my-app');
+      expect(md).toContain('source: eba-nk-promotion');
+      expect(md).toContain('project: my-app');
+      expect(md).toContain('type: solution');
+      expect(md).toContain('validated: false');
+      expect(md).toContain('votes: 0');
+    });
+
+    test('includes all sections', () => {
+      const promoter = makePromoter();
+      const gen: GeneralizedEntry = {
+        scenario: 'Test scenario',
+        attempt: 'Test attempt',
+        outcome: 'Test outcome',
+        solution: 'Test solution',
+        tags: ['promoted'],
+        crossProjectReason: 'Common pattern',
+      };
+      const md = promoter.toIntakeMarkdown(gen, 'test-project');
+      expect(md).toContain('## Test scenario');
+      expect(md).toContain('### Failed Approach');
+      expect(md).toContain('Test attempt');
+      expect(md).toContain('### Why It Failed');
+      expect(md).toContain('Test outcome');
+      expect(md).toContain('### What Works');
+      expect(md).toContain('Test solution');
+      expect(md).toContain('**Why this matters beyond one project:**');
     });
   });
 });

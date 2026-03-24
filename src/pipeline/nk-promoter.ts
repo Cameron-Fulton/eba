@@ -156,8 +156,34 @@ export class NKPromoter {
   }
 
   toIntakeMarkdown(entry: GeneralizedEntry, projectName: string): string {
-    // Stub — implemented in Task 3
-    return '';
+    const date = new Date().toISOString().slice(0, 10);
+    return [
+      '---',
+      'source: eba-nk-promotion',
+      `project: ${projectName}`,
+      `date: ${date}`,
+      'type: solution',
+      'validated: false',
+      'votes: 0',
+      '---',
+      '',
+      `## ${entry.scenario}`,
+      '',
+      `**Why this matters beyond one project:** ${entry.crossProjectReason}`,
+      '',
+      '### Failed Approach',
+      entry.attempt,
+      '',
+      '### Why It Failed',
+      entry.outcome,
+      '',
+      '### What Works',
+      entry.solution,
+      '',
+      `**Original tags:** ${entry.tags.join(', ')}`,
+      `**Promoted from:** ${projectName}`,
+      '',
+    ].join('\n');
   }
 
   promote(entries: NegativeKnowledgeEntry[]): number {
