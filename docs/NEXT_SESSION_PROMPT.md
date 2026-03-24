@@ -2,48 +2,46 @@
 
 ## Quick Start
 ```
-Read memory/INDEX.md then load memory/mp-004-20260323-task-intake-and-target-aware-design.md
+Read memory/INDEX.md then load memory/mp-005-20260323-target-aware-toolshed-and-nk-promotion.md
 ```
 
 ## System State (as of 2026-03-23)
 - **Branch:** `main` (clean, all work merged)
-- **Tests:** 315 passing across 35 suites, 0 failures
+- **Tests:** 366 passing across 37 suites, 0 failures
 - **Typecheck:** Clean (tsc --noEmit passes)
-- **Lifecycle:** /harden passed for task-intake feature
+- **Lifecycle:** /harden passed for target-aware-toolshed + NK promotion
 
 ## What Was Accomplished This Session
-1. Diagnosed EBA's closed-loop problem — no external task entry point
-2. Built task intake system: CLI arg, file drop zone (`docs/task-intake/`), `/eba` skill
-3. Built context discovery: auto-reads SYSTEM.md/CLAUDE.md/AGENTS.md from target project
-4. Wired priority chain in run.ts: CLI arg > intake > orchestrator > fallback
-5. Added projectContext injection to PromptEnhancer (placed first for lost-in-the-middle mitigation)
-6. Security hardened: path traversal guards, CRLF normalization, TOCTOU race fix, Windows case sensitivity
-7. Ran /harden — CodeRabbit review found 2 critical + 3 high issues, all resolved
-8. Designed target-aware tool-shed spec — approved, ready for implementation
+1. **Target-aware tool-shed** — ToolShedConfig refactor, segment-based command blocklist (with subshell/backtick defense), custom allowlist per project, grep_search/glob_find path validation, test_runner delegation, dual NK stores with project-first search, .eba/ artifact directories, Windows case-insensitive path checks
+2. **NK promotion** — NKPromoter class with generalizability scoring (0-100 clamped), regex-based generalization (path stripping, framework file preservation), cold start safeguard (unvalidated + votes:0), dedup ledger (promoted_ids.json), librarian intake file writing, pipeline integration (success-only gate)
+3. **/harden** — CodeRabbit review found 3 HIGH + 6 MEDIUM; all HIGHs auto-fixed (cwd propagation, subshell blocking, basename blocklist), 4 MEDIUMs auto-fixed, 6 new security tests added
 
 ## What's Next
-**Implement the target-aware tool-shed** so EBA can read/write files in external projects.
 
-Spec: `docs/superpowers/specs/2026-03-23-target-aware-toolshed-design.md`
+**Highest value next steps (pick one):**
 
-Steps:
-1. Read the spec
-2. Write implementation plan (`/write-plan`)
-3. Execute with subagent-driven development
+1. **NK vote incrementing** — The validation half of the cold start safeguard. Requires PromptEnhancer to track which NK entries were injected into a prompt and whether the task succeeded. When a promoted entry helps solve a task on a different project, increment its vote count. This closes the feedback loop.
+
+2. **Multi-agent target awareness** — The multi-agent mode still hardcodes ROOT_DIR. Extend it to support targetProjectDir so parallel agents can work on external projects.
+
+3. **Adversarial command defense** — Current subshell/backtick blocking is regex-based. A lightweight shell tokenizer would provide stronger guarantees against command injection.
 
 ## Key Decisions (settled — don't re-litigate)
-- Single tool-shed scope — target project only, no dual EBA+target access
-- `.eba/` dotfolder for artifacts in target project (solutions committed, logs/packets gitignored)
-- Command allowlist **replaces** defaults when `.eba.json` provides one; `git` always included
-- Separate NK stores (global + project), project-first search
-- Segment-based blocklist for accidental LLM destruction (not adversarial defense)
-- `grep_search`/`glob_find` must validate paths against projectRoot
-- `test_runner` delegates to configured command; filter param ignored for non-Jest
+- ToolShedConfig-only constructor, no backward-compat string overload
+- Segment-based blocklist with subshell defense (not full shell parser)
+- Copy-with-generalization for NK promotion (project keeps exact, global gets abstracted)
+- Cold start: unvalidated + votes:0 on all automated promotions
+- Regex-only generalization (no LLM calls)
+- Local dedup ledger (promoted_ids.json) over intake-dir scanning
+- Framework-convention filenames preserved during generalization
+- LIBRARIAN_INTAKE_DIR env var for configurable intake path
 
 ## Key Files
-- `src/run.ts` — CLI entry point with priority chain
-- `src/pipeline/task-intake.ts` — File drop zone with priority sorting
-- `src/pipeline/context-discovery.ts` — Project context auto-reader
-- `src/phase2/tool-shed.ts` — Tool registry (needs target-aware refactor)
-- `docs/superpowers/specs/2026-03-23-target-aware-toolshed-design.md` — The spec to implement
-- `~/.claude/skills/eba/SKILL.md` — The /eba skill
+- `src/phase2/tool-shed.ts` — ToolShedConfig, blocklist, allowlist, search validation, test_runner
+- `src/pipeline/nk-promoter.ts` — NKPromoter (score, generalize, promote)
+- `src/pipeline/eba-pipeline.ts` — Dual NK wiring, promotion hook
+- `src/pipeline/prompt-enhancer.ts` — Project-first NK search
+- `src/pipeline/context-discovery.ts` — EbaConfig from .eba.json
+- `src/run.ts` — Integration wiring for all features
+- `docs/superpowers/specs/2026-03-23-target-aware-toolshed-design.md`
+- `docs/superpowers/specs/2026-03-23-nk-promotion-design.md`
