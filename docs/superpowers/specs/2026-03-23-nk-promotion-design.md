@@ -28,49 +28,76 @@ global copy is an **abstracted, generalized version** that strips project
 paths and focuses on the framework or pattern. This prevents memory bloat in
 the global store.
 
+### Cold start safeguard
+
+Automated promotion runs with zero human involvement. To prevent low-quality
+knowledge from degrading long-term performance, every promoted entry is tagged
+`unvalidated` with `votes: 0`. This creates a trust tier:
+
+- **Unvalidated (votes: 0):** Freshly promoted, never confirmed by another
+  project. Included in search results but ranked below validated entries.
+- **Validated (votes >= 1):** A future session on a different project hit the
+  same pattern and the solution worked. The vote count increments.
+
+Vote incrementing is **out of scope** for this spec — it requires the prompt
+enhancer to track which NK entries were injected and whether the task
+succeeded, which is a separate feature. This spec only establishes the
+`unvalidated` + `votes: 0` tagging so the infrastructure is in place.
+
 ### Promotion flow
 
 ```
 Pipeline succeeds with recorded failures
-  → NKPromoter.evaluate(newEntries)
+  → NKPromoter.promote(newEntries)
     → For each entry:
       1. Score generalizability (tag heuristic + path density)
-      2. If score >= threshold → generalize → write to librarian intake
-      3. If score < threshold → skip (stays project-only)
+      2. Check dedup: skip if intake already has file for same scenario
+      3. If score >= threshold → generalize → tag unvalidated → write to intake
+      4. If score < threshold → skip (stays project-only)
 ```
 
 ### Generalizability scoring
 
-Each entry gets a score from 0-100. Threshold for promotion: **50**.
+Each entry gets a score. Threshold for promotion: **50**. Scores are clamped
+to the range 0-100 after summing all signals.
 
 **Positive signals (add points):**
 - Tags contain framework/tool names: `jest`, `typescript`, `react`, `node`,
   `webpack`, `prisma`, `docker`, `git`, `eslint`, `api`, `auth`, `oauth`,
   `cors`, `websocket`, `database`, `migration`, `cache` (+20 per match, max 40)
-- Solution field contains a general pattern (no project-specific paths) (+20)
+- Solution field contains a general pattern (no absolute paths) (+20)
 - Scenario describes a common operation: "test", "build", "deploy", "import",
   "configure", "install", "migrate" (+15)
 - Entry has a successful solution (not "No successful solution found") (+15)
 
 **Negative signals (subtract points):**
-- Scenario or solution contains absolute paths (`/`, `C:\`, `D:\`) (-20)
-- Scenario references specific filenames with extensions (`.ts`, `.js` etc.
-  preceded by a project-specific name like `userController.ts`) (-15)
-- Entry tagged `auto-recorded` only (no human-curated tags) (-10)
+- Scenario or solution contains absolute paths (`/home/`, `C:\`, `D:\`) (-20)
+- Scenario references specific filenames with extensions (e.g.,
+  `userController.ts` — a multi-word or camelCase name + extension) (-15)
+- No framework/tool tags beyond `auto-recorded` and SOP id (-10)
+
+The "no framework tags" signal replaces the original "auto-recorded only"
+check. Pipeline always adds `auto-recorded` + SOP id, so the real question is
+whether the entry has any *useful* tags indicating a generalizable pattern.
 
 ### Generalization step
 
-Before writing to the global store, the entry is transformed:
+Before writing to the global store, the entry is transformed using **regex
+heuristics only** (no LLM calls — keeps the feature synchronous and free):
 
-1. **Strip project paths:** Replace absolute paths matching `{projectRoot}/*`
-   with `{project}/...` or remove entirely
-2. **Strip specific filenames:** Replace `src/controllers/userController.ts`
-   with generic descriptions like "a controller file"
-3. **Abstract error messages:** Keep the error type and key message, strip
-   stack traces and line numbers
-4. **Preserve the pattern:** Keep the scenario, the failed approach, why it
-   failed, and what works — these are the valuable parts
-5. **Add provenance tag:** Tag with `promoted`, source project name, and date
+1. **Strip project paths:** Replace absolute paths matching common project
+   root patterns (`/home/`, `/Users/`, `C:\Users\`, `D:\projects\`) with
+   `<project>/`. Use `projectRoot` config to also strip the exact project path.
+2. **Strip specific filenames:** Replace path segments like
+   `src/controllers/userController.ts` with the last directory name only
+   (e.g., "a file in controllers/"). Regex: match path-like strings
+   (containing `/` or `\` with a `.ext` suffix) and reduce to directory context.
+3. **Strip stack traces:** Remove lines matching common stack trace patterns
+   (`at Object.<anonymous>`, `at Module._compile`, line:col references).
+4. **Preserve the pattern:** The scenario, attempt, outcome, and solution
+   text survive generalization — only paths, filenames, and traces are stripped.
+5. **Add provenance tags:** `promoted`, `unvalidated`, `votes:0`,
+   `source:{projectName}`, `promoted:{YYYY-MM-DD}`
 
 Example transformation:
 
@@ -91,13 +118,22 @@ when mocking an ESM package
 Attempt: Used jest.mock() at top of test file
 Outcome: ESM re-exports in the target package break Jest's CommonJS mock hoisting
 Solution: Add transformIgnorePatterns to jest.config to transpile the ESM package
-Tags: jest, esm, promoted, source:my-auth-app, promoted:2026-03-23
+Tags: jest, esm, promoted, unvalidated, votes:0, source:my-auth-app, promoted:2026-03-23
 ```
 
 ### Librarian intake format
 
-Promoted entries are written to `D:\_system\librarian\intake\` as markdown
-files following the existing intake format:
+Promoted entries are written to the librarian intake directory as markdown
+files following the existing intake format.
+
+**Intake directory:** Resolved from `LIBRARIAN_INTAKE_DIR` env var, falling
+back to `D:\_system\librarian\intake\`. This allows the path to be configured
+per-environment without hardcoding.
+
+**Filename format:** `eba-nk-{projectName}-{YYYY-MM-DD}-{first8charsOfEntryId}.md`
+
+This prevents collisions (entry ID is unique) and makes it easy to see which
+project and date a promotion came from when scanning the intake folder.
 
 ```markdown
 ---
@@ -105,6 +141,8 @@ source: eba-nk-promotion
 project: {project_name from .eba.json or directory name}
 date: {YYYY-MM-DD}
 type: solution
+validated: false
+votes: 0
 ---
 
 ## {Generalized scenario}
@@ -120,18 +158,31 @@ type: solution
 ### What Works
 {Generalized solution}
 
-**Original tags:** {comma-separated tags}
+**Original tags:** {comma-separated original tags}
 **Promoted from:** {project name}
 ```
 
 The librarian picks these up on its regular scan, processes them into
 `D:\_system\knowledge\`, and they become available to all projects.
 
+### Deduplication
+
+Before writing an intake file, `promote()` checks whether a file matching the
+same project + scenario already exists in the intake directory. The check
+is a filename-prefix scan: look for files starting with
+`eba-nk-{projectName}-` and read their `## ` header line. If the generalized
+scenario matches an existing file (case-insensitive), skip the write.
+
+This prevents the same failure from generating duplicate intake files across
+repeated pipeline runs. Cross-project deduplication (two projects discovering
+the same pattern) is left to the librarian.
+
 ### NKPromoter class
 
 ```typescript
 interface NKPromoterConfig {
-  /** Librarian intake directory */
+  /** Librarian intake directory. Resolved from LIBRARIAN_INTAKE_DIR env var
+   *  or defaults to D:\_system\librarian\intake\ */
   intakeDir: string;
   /** Project name (from .eba.json or fallback to dir name) */
   projectName: string;
@@ -141,34 +192,73 @@ interface NKPromoterConfig {
   threshold?: number;
 }
 
+interface GeneralizedEntry {
+  /** Generalized scenario (paths stripped) */
+  scenario: string;
+  /** Generalized attempt */
+  attempt: string;
+  /** Generalized outcome */
+  outcome: string;
+  /** Generalized solution */
+  solution: string;
+  /** Original tags + provenance tags (promoted, unvalidated, votes:0, etc.) */
+  tags: string[];
+  /** One-sentence description of why this matters beyond one project */
+  crossProjectReason: string;
+}
+
 class NKPromoter {
   constructor(config: NKPromoterConfig);
 
   /** Evaluate entries and promote qualifying ones. Returns count promoted. */
   promote(entries: NegativeKnowledgeEntry[]): number;
 
-  /** Score a single entry for generalizability (0-100). Exported for testing. */
+  /** Score a single entry for generalizability (0-100, clamped). */
   score(entry: NegativeKnowledgeEntry): number;
 
-  /** Generalize an entry by stripping project-specific details. Exported for testing. */
-  generalize(entry: NegativeKnowledgeEntry): NegativeKnowledgeEntry;
+  /** Transform an entry into a generalized version for the global store. */
+  generalize(entry: NegativeKnowledgeEntry): GeneralizedEntry;
+
+  /** Render a GeneralizedEntry as librarian intake markdown. */
+  toIntakeMarkdown(entry: GeneralizedEntry, projectName: string): string;
 }
 ```
 
 ### Integration with pipeline
 
-In `eba-pipeline.ts`, after the existing NK save block (post-task, when
-`failedLogs.length > 0` and the task succeeded):
+In `eba-pipeline.ts`, after the existing NK save block. The promotion block
+runs **only when the task succeeded AND there were failed attempts** — this
+ensures promoted entries always have a verified solution.
 
 ```typescript
 // Promote qualifying NK entries to global store via librarian intake
-if (this.config.projectNkStore && this.config.nkPromoter) {
-  const newEntries = failedLogs.map(log => /* the entries just added */);
-  const promoted = this.config.nkPromoter.promote(newEntries);
+if (succeeded && failedLogs.length > 0 && this.config.projectNkStore && this.config.nkPromoter) {
+  // Collect the entries that were just added (captured from nkTarget.add() return values)
+  const promoted = this.config.nkPromoter.promote(newNkEntries);
   if (promoted > 0) {
     console.log(`📤 Promoted ${promoted} NK entr${promoted === 1 ? 'y' : 'ies'} to global knowledge`);
   }
 }
+```
+
+The `newNkEntries` array is built by collecting return values from the
+`nkTarget.add()` calls in the failed-logs loop above:
+
+```typescript
+const newNkEntries: NegativeKnowledgeEntry[] = [];
+for (const log of failedLogs) {
+  const entry = nkTarget.add({
+    scenario: activeTask.slice(0, 200),
+    attempt:  log.llm_response.slice(0, 300),
+    outcome:  log.test_result.output.slice(0, 300),
+    solution: succeeded
+      ? `Succeeded on attempt ${logs.findIndex(l => l.status === 'success') + 1}`
+      : 'No successful solution found in this session',
+    tags:     ['auto-recorded', this.config.sopId],
+  });
+  newNkEntries.push(entry);
+}
+nkTarget.saveToDisk();
 ```
 
 The promoter is only created when targeting an external project (in `run.ts`).
@@ -179,7 +269,8 @@ promotion needed.
 
 NKPromoter is created automatically in `run.ts` when all conditions are met:
 1. Targeting an external project (`isExternalProject === true`)
-2. Librarian intake directory exists (`D:\_system\librarian\intake\`)
+2. Librarian intake directory exists (from `LIBRARIAN_INTAKE_DIR` env var or
+   default path `D:\_system\librarian\intake\`)
 
 If the librarian intake directory doesn't exist, promotion is silently
 skipped — no error, no warning. The feature is invisible until the system
@@ -189,10 +280,10 @@ infrastructure is in place.
 
 | File | Change |
 |------|--------|
-| `src/pipeline/nk-promoter.ts` | New file. `NKPromoter` class with `score()`, `generalize()`, `promote()`. |
-| `src/pipeline/eba-pipeline.ts` | Add `nkPromoter?: NKPromoter` to config. Call `promote()` after NK save when conditions met. |
-| `src/run.ts` | Create `NKPromoter` when targeting external project and librarian intake exists. Pass to pipeline config. |
-| `tests/pipeline/nk-promoter.test.ts` | New file. Unit tests for scoring, generalization, and promotion. |
+| `src/pipeline/nk-promoter.ts` | New file. `NKPromoter` class with `score()`, `generalize()`, `toIntakeMarkdown()`, `promote()`. `GeneralizedEntry` and `NKPromoterConfig` interfaces. |
+| `src/pipeline/eba-pipeline.ts` | Add `nkPromoter?: NKPromoter` to config. Collect `newNkEntries` from `add()` returns. Call `promote()` after NK save when `succeeded && failedLogs.length > 0`. |
+| `src/run.ts` | Create `NKPromoter` when targeting external project and librarian intake exists. Pass to pipeline config. Resolve intake dir from env var. |
+| `tests/pipeline/nk-promoter.test.ts` | New file. Unit tests for scoring, generalization, dedup, intake file writing, and promotion. |
 
 ## Files Unchanged
 
@@ -206,26 +297,34 @@ infrastructure is in place.
 
 - Unit tests for `score()`: high-scoring entries (framework tags, general
   patterns), low-scoring entries (project paths, no solution), edge cases
-  (empty tags, mixed signals)
+  (empty tags, mixed signals), verify clamping to 0-100
 - Unit tests for `generalize()`: path stripping, filename abstraction, stack
-  trace removal, provenance tag addition
+  trace removal, provenance tag addition (`promoted`, `unvalidated`, `votes:0`)
+- Unit tests for `toIntakeMarkdown()`: correct frontmatter with
+  `validated: false` and `votes: 0`, correct section structure
 - Unit tests for `promote()`: writes correct files to intake dir, skips
-  low-scoring entries, handles missing intake dir gracefully
+  low-scoring entries, handles missing intake dir gracefully, deduplicates
+  against existing intake files
 - Integration: pipeline run with failing attempts → successful resolution →
-  verify promotion file appears in intake dir
+  verify promotion file appears in intake dir with correct tags
 
 ## Scope Boundaries
 
 **In scope:**
-- Generalizability scoring heuristic
-- Path-stripping generalization
+- Generalizability scoring heuristic (regex-based, no LLM)
+- Path-stripping generalization (regex-based)
+- Cold start tagging (`unvalidated`, `votes: 0`)
+- Deduplication within intake directory
 - Librarian intake file writing
-- Pipeline integration (post-task hook)
+- Pipeline integration (post-task, success-only hook)
 - Zero-config: works when infra exists, invisible when it doesn't
+- Configurable intake dir via env var
 
 **Out of scope:**
+- Vote incrementing on successful cross-project application (future feature)
 - Librarian processing of intake files (already exists)
 - Global-to-project NK propagation (reverse direction)
 - Human review/approval of promotions (automated only)
-- Deduplication against existing global NK entries (librarian handles this)
+- Cross-project deduplication (librarian handles this)
 - ML-based scoring (heuristic is sufficient for v1)
+- LLM-assisted generalization (regex is sufficient for v1)
