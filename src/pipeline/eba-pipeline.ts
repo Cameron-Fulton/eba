@@ -36,6 +36,7 @@ import { VisualProofSystem, ProofContext } from '../phase3/visual-proof';
 import { PromptEnhancer }           from './prompt-enhancer';
 import { ProjectOrchestrator }      from './project-orchestrator';
 import { NKPromoter }               from './nk-promoter';
+import { createVoteReceipts, VoteReceipt } from './nk-vote-tracker';
 
 export interface EBAPipelineConfig {
   /** Directory containing ACTIVE_TASK.md, PROJECT.md */
@@ -188,6 +189,7 @@ export class EBAPipeline {
     );
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      enhancer.clearInjectedNkEntries();
       executor = createOrchestratorExecutor({
         llmProvider: enhancer,
         testRunner: this.config.testRunner,
@@ -295,6 +297,14 @@ export class EBAPipeline {
       console.log(`\n💾 Recorded ${failedLogs.length} failure(s) to negative knowledge store`);
     }
 
+    // Build vote receipts from injected NK entries
+    let voteReceipts: VoteReceipt[] = [];
+    const injectedEntries = enhancer.getInjectedNkEntries();
+    if (injectedEntries.length > 0) {
+      const targetDir = this.config.targetProjectDir ?? path.dirname(this.config.docsDir);
+      voteReceipts = createVoteReceipts(injectedEntries, targetDir, succeeded);
+    }
+
     // Promote qualifying NK entries to global store via librarian intake
     if (succeeded && failedLogs.length > 0 && this.config.projectNkStore && this.config.nkPromoter) {
       try {
@@ -319,6 +329,10 @@ export class EBAPipeline {
 
       console.log('\n🗜️  Compressing session into memory packet...');
       const packet = await compressionAgent.compress(transcript);
+
+      if (voteReceipts.length > 0) {
+        packet.vote_receipts = voteReceipts;
+      }
 
       // 8. Write memory packet to disk
       fs.mkdirSync(this.config.packetsDir, { recursive: true });

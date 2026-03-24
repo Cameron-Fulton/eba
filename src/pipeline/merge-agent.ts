@@ -13,6 +13,8 @@ import {
   deserializePacket, serializePacket,
 } from '../phase1/memory-packet';
 import { LLMProvider } from '../phase1/orchestrator';
+import { NegativeKnowledgeStore } from '../phase1/negative-knowledge';
+import { VoteReceipt, applyVoteReceipts } from './nk-vote-tracker';
 
 function normalizeForDedup(s: string): string {
   return s.toLowerCase().trim().replace(/\s+/g, ' ');
@@ -222,6 +224,22 @@ export function mergePackets(packets: MemoryPacket[]): MemoryPacket {
     };
   }
 
+  // Union vote_receipts (for crash recovery)
+  const allReceipts: VoteReceipt[] = [];
+  const receiptKeys = new Set<string>();
+  for (const pkt of packets) {
+    for (const receipt of pkt.vote_receipts ?? []) {
+      const key = `${receipt.nk_id}|${receipt.context_keys.sort().join('+')}`;
+      if (!receiptKeys.has(key)) {
+        receiptKeys.add(key);
+        allReceipts.push(receipt);
+      }
+    }
+  }
+  if (allReceipts.length > 0) {
+    merged.vote_receipts = allReceipts;
+  }
+
   return merged;
 }
 
@@ -231,6 +249,7 @@ export interface MergeAgentConfig {
   maxVocabTokens?: number;
   summaryTokenLimit?: number;
   routineProvider?: LLMProvider;
+  globalNkStore?: NegativeKnowledgeStore;
 }
 
 export interface MergeResult {
@@ -303,8 +322,31 @@ export class MergeAgent {
       }
       allPackets.push(...newPackets);
 
+      // Process vote receipts before merging
+      if (this.config.globalNkStore) {
+        const sweepReceipts: VoteReceipt[] = [];
+        for (const pkt of allPackets) {
+          if (pkt.vote_receipts) {
+            sweepReceipts.push(...pkt.vote_receipts);
+          }
+        }
+        if (sweepReceipts.length > 0) {
+          const { applied, skipped } = applyVoteReceipts(this.config.globalNkStore, sweepReceipts);
+          this.config.globalNkStore.saveToDisk();
+          if (applied > 0) {
+            console.log(`🗳️  Applied ${applied} vote receipt(s) to global NK store`);
+          }
+          if (skipped > 0) {
+            console.warn(`⚠️  Skipped ${skipped} vote receipt(s) (entries not found)`);
+          }
+        }
+      }
+
+      // Strip receipts before merge
+      const strippedPackets = allPackets.map(pkt => ({ ...pkt, vote_receipts: undefined }));
+
       // Merge using the pure function
-      const mergedPacket = mergePackets(allPackets);
+      const mergedPacket = mergePackets(strippedPackets);
 
       // Write merged packet
       const outputFilename = `${mergedPacket.session_id}_merged.json`;

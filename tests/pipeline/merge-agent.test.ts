@@ -3,6 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { mergePackets, MergeAgent } from '../../src/pipeline/merge-agent';
 import { MemoryPacket } from '../../src/phase1/memory-packet';
+import { VoteReceipt } from '../../src/pipeline/nk-vote-tracker';
+import { NegativeKnowledgeStore } from '../../src/phase1/negative-knowledge';
 
 function makePacket(overrides: Partial<MemoryPacket> = {}): MemoryPacket {
   return {
@@ -216,6 +218,35 @@ describe('mergePackets', () => {
     expect(merged.session_meta!.token_budget_rationale).toBe('Budget A\nBudget B');
   });
 
+  it('unions vote_receipts from multiple packets', () => {
+    const receipt1: VoteReceipt = { nk_id: 'nk_001', context_keys: ['jest'], succeeded: true, timestamp: '2026-01-01T00:00:00Z' };
+    const receipt2: VoteReceipt = { nk_id: 'nk_002', context_keys: ['react'], succeeded: false, timestamp: '2026-01-02T00:00:00Z' };
+    const a = makePacket({ vote_receipts: [receipt1] });
+    const b = makePacket({ vote_receipts: [receipt2] });
+    const merged = mergePackets([a, b]);
+    expect(merged.vote_receipts).toHaveLength(2);
+    expect(merged.vote_receipts![0].nk_id).toBe('nk_001');
+    expect(merged.vote_receipts![1].nk_id).toBe('nk_002');
+  });
+
+  it('deduplicates vote_receipts by nk_id + context_keys', () => {
+    const receipt1: VoteReceipt = { nk_id: 'nk_001', context_keys: ['jest', 'typescript'], succeeded: true, timestamp: '2026-01-01T00:00:00Z' };
+    const receipt2: VoteReceipt = { nk_id: 'nk_001', context_keys: ['typescript', 'jest'], succeeded: false, timestamp: '2026-01-02T00:00:00Z' };
+    const a = makePacket({ vote_receipts: [receipt1] });
+    const b = makePacket({ vote_receipts: [receipt2] });
+    const merged = mergePackets([a, b]);
+    // Same nk_id + same context_keys (sorted) → deduped to 1
+    expect(merged.vote_receipts).toHaveLength(1);
+    expect(merged.vote_receipts![0].nk_id).toBe('nk_001');
+  });
+
+  it('omits vote_receipts when no packets have them', () => {
+    const a = makePacket();
+    const b = makePacket();
+    const merged = mergePackets([a, b]);
+    expect(merged.vote_receipts).toBeUndefined();
+  });
+
   it('never-drop: rejected_ideas, entities, vocabulary survive merge with empty packet', () => {
     const full = makePacket({
       rejected_ideas: [{ idea: 'Use SOAP', reason: 'Ancient' }],
@@ -284,5 +315,133 @@ describe('MergeAgent.sweep()', () => {
     expect(merged.rejected_ideas).toHaveLength(2);
     expect(merged.entities).toHaveLength(1);
     expect(merged.vocabulary).toHaveLength(1);
+  });
+
+  test('applies vote receipts to global NK store and strips from merged output', async () => {
+    // Create a real NK store with temp dir
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eba-merge-vote-'));
+    const nkDir = path.join(tmpDir, 'nk-solutions');
+    fs.mkdirSync(nkDir, { recursive: true });
+    const nkStore = new NegativeKnowledgeStore(nkDir);
+
+    // Add an NK entry
+    const entry = nkStore.add({
+      scenario: 'Test scenario for vote',
+      attempt: 'Failed attempt',
+      outcome: 'Bad outcome',
+      solution: 'The fix',
+      tags: ['jest'],
+    });
+    nkStore.saveToDisk();
+
+    // Create pending dir and packets dir for this test
+    const votePendingDir = path.join(tmpDir, 'pending_merge');
+    const votePacketsDir = path.join(tmpDir, 'memory-packets');
+    fs.mkdirSync(votePendingDir, { recursive: true });
+    fs.mkdirSync(votePacketsDir, { recursive: true });
+
+    // Write a packet with vote_receipts
+    const receipt: VoteReceipt = {
+      nk_id: entry.id,
+      context_keys: ['jest'],
+      succeeded: true,
+      timestamp: new Date().toISOString(),
+    };
+    const pkt = makePacket({ vote_receipts: [receipt] });
+    writePacketFile(votePendingDir, pkt, 'task_vote_001.json');
+
+    const voteAgent = new MergeAgent({
+      pendingDir: votePendingDir,
+      packetsDir: votePacketsDir,
+      globalNkStore: nkStore,
+    });
+
+    const result = await voteAgent.sweep();
+    expect(result.merged).toBe(true);
+
+    // Verify the merged output does NOT contain vote_receipts
+    const mergedJson = JSON.parse(fs.readFileSync(result.outputPath!, 'utf-8'));
+    expect(mergedJson.vote_receipts).toBeUndefined();
+
+    // Verify the NK entry was updated with votes
+    nkStore.loadFromDisk();
+    const updatedEntry = nkStore.get(entry.id);
+    expect(updatedEntry).toBeDefined();
+    expect(updatedEntry!.vote_metrics).toBeDefined();
+    expect(updatedEntry!.vote_metrics!.contexts['jest'].total_attempts).toBe(1);
+    expect(updatedEntry!.vote_metrics!.contexts['jest'].successes).toBe(1);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('handles crash recovery — master packet with unprocessed receipts', async () => {
+    // Create a real NK store with temp dir
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eba-merge-crash-'));
+    const nkDir = path.join(tmpDir, 'nk-solutions');
+    fs.mkdirSync(nkDir, { recursive: true });
+    const nkStore = new NegativeKnowledgeStore(nkDir);
+
+    const entry = nkStore.add({
+      scenario: 'Crash recovery scenario',
+      attempt: 'Failed attempt',
+      outcome: 'Bad outcome',
+      solution: 'The fix',
+      tags: ['typescript'],
+    });
+    nkStore.saveToDisk();
+
+    const crashPendingDir = path.join(tmpDir, 'pending_merge');
+    const crashPacketsDir = path.join(tmpDir, 'memory-packets');
+    fs.mkdirSync(crashPendingDir, { recursive: true });
+    fs.mkdirSync(crashPacketsDir, { recursive: true });
+
+    // Simulate a master packet already in packetsDir (from a previous merge)
+    const masterReceipt: VoteReceipt = {
+      nk_id: entry.id,
+      context_keys: ['typescript'],
+      succeeded: false,
+      timestamp: new Date().toISOString(),
+    };
+    const masterPkt = makePacket({
+      session_id: 'master_session',
+      vote_receipts: [masterReceipt],
+    });
+    writePacketFile(crashPacketsDir, masterPkt, 'master_session_merged.json');
+
+    // New pending packet with another receipt for the same entry
+    const newReceipt: VoteReceipt = {
+      nk_id: entry.id,
+      context_keys: ['typescript'],
+      succeeded: true,
+      timestamp: new Date().toISOString(),
+    };
+    const newPkt = makePacket({
+      session_id: 'new_session',
+      vote_receipts: [newReceipt],
+    });
+    writePacketFile(crashPendingDir, newPkt, 'new_session.json');
+
+    const crashAgent = new MergeAgent({
+      pendingDir: crashPendingDir,
+      packetsDir: crashPacketsDir,
+      globalNkStore: nkStore,
+    });
+
+    const result = await crashAgent.sweep();
+    expect(result.merged).toBe(true);
+
+    // Both receipts should have been applied (master + new)
+    nkStore.loadFromDisk();
+    const updatedEntry = nkStore.get(entry.id);
+    expect(updatedEntry).toBeDefined();
+    expect(updatedEntry!.vote_metrics).toBeDefined();
+    expect(updatedEntry!.vote_metrics!.contexts['typescript'].total_attempts).toBe(2);
+    expect(updatedEntry!.vote_metrics!.contexts['typescript'].successes).toBe(1);
+
+    // Merged output should not have vote_receipts
+    const mergedJson = JSON.parse(fs.readFileSync(result.outputPath!, 'utf-8'));
+    expect(mergedJson.vote_receipts).toBeUndefined();
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });

@@ -10,6 +10,7 @@ import { ThreePillarModel } from '../../src/phase3/three-pillar-model';
 import { ConsortiumVoter, VoteResult } from '../../src/phase3/consortium-voter';
 import { VisualProofSystem, ProofContext, ProofReport } from '../../src/phase3/visual-proof';
 import { NegativeKnowledgeStore } from '../../src/phase1/negative-knowledge';
+import { VoteReceipt } from '../../src/pipeline/nk-vote-tracker';
 
 describe('EBAPipeline Integration', () => {
   let tempDir: string;
@@ -394,6 +395,77 @@ describe('EBAPipeline Integration', () => {
       expect(hookExecute).toHaveBeenCalledTimes(1);
       expect(fs.existsSync(demoPath)).toBe(true);
       expect(fs.readFileSync(demoPath, 'utf-8')).toContain('Visual Proof Report');
+    });
+  });
+
+  describe('9) VOTE RECEIPTS', () => {
+    test('attaches vote_receipts to written packet when NK entries are injected', async () => {
+      fs.writeFileSync(path.join(docsDir, 'ACTIVE_TASK.md'), 'Refactor parser module safely');
+
+      // Pre-populate NK solutions dir with an entry whose scenario overlaps with the task
+      // Include "Task:" prefix because PromptEnhancer searches against the full prompt
+      // which includes the "Task:" prefix from orchestrator prompts.
+      const negativeKnowledge = new NegativeKnowledgeStore(solutionsDir);
+      negativeKnowledge.add({
+        scenario: 'Task: Refactor parser module safely',
+        attempt: 'Removed parser guard and introduced regression',
+        outcome: 'Tests failed with parser crash',
+        solution: 'Keep guard and refactor incrementally',
+        tags: ['parser', 'refactor'],
+      });
+      negativeKnowledge.saveToDisk();
+
+      const primaryProvider: LLMProvider = {
+        call: jest.fn().mockResolvedValue('implemented safer parser changes'),
+      };
+
+      const routineProvider: LLMProvider = {
+        call: jest.fn().mockResolvedValue(COMPRESSION_RESPONSE),
+      };
+
+      const pipeline = new EBAPipeline(
+        createConfig({
+          primaryProvider,
+          routineProvider,
+          testRunner: createMockTestRunner(true),
+        })
+      );
+
+      const result = await pipeline.run();
+
+      expect(result.status).toBe('success');
+      expect(result.packetPath).not.toBeNull();
+
+      // Read the written packet and verify vote_receipts
+      const packetJson = JSON.parse(fs.readFileSync(result.packetPath!, 'utf-8'));
+      expect(packetJson.vote_receipts).toBeDefined();
+      expect(Array.isArray(packetJson.vote_receipts)).toBe(true);
+      expect(packetJson.vote_receipts.length).toBeGreaterThan(0);
+
+      const receipt = packetJson.vote_receipts[0] as VoteReceipt;
+      expect(receipt.nk_id).toBeDefined();
+      expect(receipt.context_keys).toBeDefined();
+      expect(Array.isArray(receipt.context_keys)).toBe(true);
+      expect(receipt.succeeded).toBe(true);
+      expect(receipt.timestamp).toBeDefined();
+    });
+
+    test('does not attach vote_receipts when no NK entries are injected', async () => {
+      fs.writeFileSync(path.join(docsDir, 'ACTIVE_TASK.md'), 'Totally unique task with no NK matches xyzzy');
+
+      const pipeline = new EBAPipeline(
+        createConfig({
+          testRunner: createMockTestRunner(true),
+        })
+      );
+
+      const result = await pipeline.run();
+
+      expect(result.status).toBe('success');
+      expect(result.packetPath).not.toBeNull();
+
+      const packetJson = JSON.parse(fs.readFileSync(result.packetPath!, 'utf-8'));
+      expect(packetJson.vote_receipts).toBeUndefined();
     });
   });
 });
