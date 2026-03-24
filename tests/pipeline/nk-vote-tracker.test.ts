@@ -107,14 +107,14 @@ describe('buildContextKeys', () => {
     expect(compound.length).toBe(0);
   });
 
-  test('compound key includes max 1 tier1 framework', () => {
-    // tier2 must come from taskTags
+  test('compound key includes all tier1+tier2 tags with Set dedup', () => {
+    // Per spec: compound key merges tier1+tier2 via Set dedup, sorted, capped at 4
     const keys = buildContextKeys(['react', 'next'], ['prisma']);
     const compound = keys.filter(k => k.includes('+'));
     expect(compound.length).toBe(1);
     const parts = compound[0].split('+');
-    const tier1Count = parts.filter(p => TIER_1_FRAMEWORKS.has(p)).length;
-    expect(tier1Count).toBeLessThanOrEqual(1);
+    // All three tags should be present (next, prisma, react) — sorted
+    expect(parts).toEqual(['next', 'prisma', 'react']);
   });
 
   test('compound key caps at 4 tags', () => {

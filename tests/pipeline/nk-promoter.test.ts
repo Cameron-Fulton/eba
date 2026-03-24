@@ -244,7 +244,7 @@ describe('NKPromoter', () => {
       expect(files[0]).toContain('eba-nk-test-app');
       const content = fs.readFileSync(path.join(tempIntakeDir, files[0]), 'utf-8');
       expect(content).toContain('validated: false');
-      expect(content).toContain('votes: 0');
+      expect(content).not.toContain('votes: 0');
     });
 
     test('skips low-scoring entries', () => {
@@ -322,7 +322,7 @@ describe('NKPromoter', () => {
       expect(files).toHaveLength(1);
       const content = fs.readFileSync(path.join(tempIntakeDir, files[0]), 'utf-8');
       expect(content).toContain('validated: false');
-      expect(content).toContain('votes: 0');
+      expect(content).not.toContain('votes: 0');
       const ledger = JSON.parse(fs.readFileSync(
         path.join(tempProjectDir, '.eba', 'promoted_ids.json'), 'utf-8'
       ));
@@ -349,7 +349,7 @@ describe('NKPromoter', () => {
       expect(md).toContain('project: my-app');
       expect(md).toContain('type: solution');
       expect(md).toContain('validated: false');
-      expect(md).toContain('votes: 0');
+      expect(md).not.toContain('votes: 0');
     });
 
     test('includes all sections', () => {
