@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { PromptEnhancer, PromptEnhancerConfig } from '../../src/pipeline/prompt-enhancer';
 import { LLMProvider } from '../../src/phase1/orchestrator';
 import { NegativeKnowledgeStore } from '../../src/phase1/negative-knowledge';
@@ -118,5 +121,48 @@ describe('PromptEnhancer', () => {
       const result = enhancer.enhance('Fix the authentication login module error');
       expect(result).toContain('global-only');
     });
+  });
+});
+
+describe('NK injection tracking', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pe-nk-')); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('tracks injected NK entries', () => {
+    const nkStore = new NegativeKnowledgeStore(tmpDir);
+    const entry = nkStore.add({ scenario: 'deploy failure NTFS', attempt: 'symlinks', outcome: 'failed', solution: 'junctions', tags: ['jest'] });
+    const enhancer = new PromptEnhancer({ provider: mockProvider, negativeKnowledge: nkStore, sop: mockSop, toolShed: mockToolShed });
+    enhancer.enhance('deploy failure NTFS');
+    const injected = enhancer.getInjectedNkEntries();
+    expect(injected.length).toBeGreaterThan(0);
+    expect(injected[0].id).toBe(entry.id);
+  });
+
+  it('clearInjectedNkEntries resets', () => {
+    const nkStore = new NegativeKnowledgeStore(tmpDir);
+    nkStore.add({ scenario: 'deploy failure NTFS', attempt: 'symlinks', outcome: 'failed', solution: 'junctions', tags: ['jest'] });
+    const enhancer = new PromptEnhancer({ provider: mockProvider, negativeKnowledge: nkStore, sop: mockSop, toolShed: mockToolShed });
+    enhancer.enhance('deploy failure NTFS');
+    expect(enhancer.getInjectedNkEntries().length).toBeGreaterThan(0);
+    enhancer.clearInjectedNkEntries();
+    expect(enhancer.getInjectedNkEntries()).toEqual([]);
+  });
+
+  it('returns empty array before any enhance call', () => {
+    const nkStore = new NegativeKnowledgeStore(tmpDir);
+    const enhancer = new PromptEnhancer({ provider: mockProvider, negativeKnowledge: nkStore, sop: mockSop, toolShed: mockToolShed });
+    expect(enhancer.getInjectedNkEntries()).toEqual([]);
+  });
+
+  it('returns a defensive copy', () => {
+    const nkStore = new NegativeKnowledgeStore(tmpDir);
+    nkStore.add({ scenario: 'deploy failure NTFS', attempt: 'symlinks', outcome: 'failed', solution: 'junctions', tags: ['jest'] });
+    const enhancer = new PromptEnhancer({ provider: mockProvider, negativeKnowledge: nkStore, sop: mockSop, toolShed: mockToolShed });
+    enhancer.enhance('deploy failure NTFS');
+    const first = enhancer.getInjectedNkEntries();
+    const second = enhancer.getInjectedNkEntries();
+    expect(first).toEqual(second);
+    expect(first).not.toBe(second);
   });
 });

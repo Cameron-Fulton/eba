@@ -5,6 +5,7 @@ import {
   deserializePacket,
   compressTranscript,
 } from '../../src/phase1/memory-packet';
+import { VoteReceipt } from '../../src/pipeline/nk-vote-tracker';
 
 function createValidPacket(): MemoryPacket {
   return {
@@ -92,6 +93,46 @@ describe('Memory Packet Serialization', () => {
 
   test('deserialize throws on valid JSON but invalid packet', () => {
     expect(() => deserializePacket('{"foo": "bar"}')).toThrow();
+  });
+});
+
+describe('vote_receipts field', () => {
+  test('accepts packet with valid vote_receipts array', () => {
+    const packet = createValidPacket();
+    const receipts: VoteReceipt[] = [
+      { nk_id: 'nk_123', context_keys: ['jest'], succeeded: true, timestamp: new Date().toISOString() },
+    ];
+    packet.vote_receipts = receipts;
+    const result = validateMemoryPacket(packet);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  test('accepts packet without vote_receipts', () => {
+    const packet = createValidPacket();
+    // vote_receipts is not set
+    const result = validateMemoryPacket(packet);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  test('rejects non-array vote_receipts', () => {
+    const packet = createValidPacket() as any;
+    packet.vote_receipts = 'not an array';
+    const result = validateMemoryPacket(packet);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('vote_receipts must be an array when present');
+  });
+
+  test('serializes and deserializes packet with vote_receipts', () => {
+    const packet = createValidPacket();
+    const receipts: VoteReceipt[] = [
+      { nk_id: 'nk_456', context_keys: ['typescript', 'jest'], succeeded: false, timestamp: new Date().toISOString() },
+    ];
+    packet.vote_receipts = receipts;
+    const json = serializePacket(packet);
+    const restored = deserializePacket(json);
+    expect(restored.vote_receipts).toEqual(receipts);
   });
 });
 

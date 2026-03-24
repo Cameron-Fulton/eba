@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { VoteReceipt } from '../pipeline/nk-vote-tracker';
 
 export interface MemoryPacket {
   id: string;
@@ -20,6 +21,7 @@ export interface MemoryPacket {
   entities?: Entity[];
   vocabulary?: VocabularyEntry[];
   session_meta?: SessionMeta;
+  vote_receipts?: VoteReceipt[];
 }
 
 export interface Decision {
@@ -155,6 +157,11 @@ export function validateMemoryPacket(packet: unknown): { valid: boolean; errors:
   if (p.session_meta !== undefined) {
     if (typeof p.session_meta !== 'object' || p.session_meta === null || Array.isArray(p.session_meta)) {
       errors.push('session_meta must be an object when present');
+    }
+  }
+  if (p.vote_receipts !== undefined) {
+    if (!Array.isArray(p.vote_receipts)) {
+      errors.push('vote_receipts must be an array when present');
     }
   }
 

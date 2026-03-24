@@ -9,7 +9,7 @@
  */
 
 import { LLMProvider, Message, LLMResponse } from '../phase1/orchestrator';
-import { NegativeKnowledgeStore } from '../phase1/negative-knowledge';
+import { NegativeKnowledgeStore, NegativeKnowledgeEntry } from '../phase1/negative-knowledge';
 import { SOPEngine } from '../phase2/sop';
 import { ToolShed, ToolSchema } from '../phase2/tool-shed';
 
@@ -30,6 +30,7 @@ export interface PromptEnhancerConfig {
 
 export class PromptEnhancer implements LLMProvider {
   private config: PromptEnhancerConfig;
+  private injectedNkEntries: NegativeKnowledgeEntry[] = [];
   callWithTools?: (messages: Message[], tools: ToolSchema[]) => Promise<LLMResponse>;
 
   constructor(config: PromptEnhancerConfig) {
@@ -101,17 +102,18 @@ export class PromptEnhancer implements LLMProvider {
       .slice(0, 10)
       .join(' ');
     // Project-first search: project entries fill first, global fills remaining
-    let failures: Array<{ scenario: string; attempt: string; outcome: string; solution: string }> = [];
+    let nkEntries: NegativeKnowledgeEntry[] = [];
     if (this.config.projectNegativeKnowledge) {
-      failures = this.config.projectNegativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
+      nkEntries = this.config.projectNegativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
     }
-    const remainingSlots = maxNk - failures.length;
+    const remainingSlots = maxNk - nkEntries.length;
     if (remainingSlots > 0) {
-      const globalFailures = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, remainingSlots);
-      failures = [...failures, ...globalFailures];
+      const globalEntries = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, remainingSlots);
+      nkEntries = [...nkEntries, ...globalEntries];
     }
+    this.injectedNkEntries = [...nkEntries];
 
-    if (failures.length > 0) {
+    if (nkEntries.length > 0) {
       const sanitize = (s: string) => s
         // Strip markdown headers that could create new prompt sections
         .replace(/^#{1,6} /gm, '')
@@ -122,7 +124,7 @@ export class PromptEnhancer implements LLMProvider {
         // Truncate to reasonable max length per field
         .slice(0, 500)
         .trim();
-      const failureLines = failures.map(f =>
+      const failureLines = nkEntries.map(f =>
         `- Scenario: ${sanitize(f.scenario)}\n  Failed approach: ${sanitize(f.attempt)}\n  Why it failed: ${sanitize(f.outcome)}\n  What works: ${sanitize(f.solution)}`
       );
       sections.push([
@@ -134,5 +136,13 @@ export class PromptEnhancer implements LLMProvider {
     sections.push('## Task', prompt);
 
     return sections.join('\n\n');
+  }
+
+  getInjectedNkEntries(): NegativeKnowledgeEntry[] {
+    return [...this.injectedNkEntries];
+  }
+
+  clearInjectedNkEntries(): void {
+    this.injectedNkEntries = [];
   }
 }
