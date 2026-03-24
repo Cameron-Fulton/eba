@@ -367,10 +367,24 @@ Expected: PASS
 ```typescript
 // Add to tests/pipeline/nk-vote-tracker.test.ts
 import { resolveWilsonScore } from '../../src/pipeline/nk-vote-tracker';
+import { NegativeKnowledgeEntry } from '../../src/phase1/negative-knowledge';
+
+// Inline helper — Task 3 will define a shared makeEntry, but Task 2 needs it now.
+// This local version is sufficient for resolveWilsonScore tests.
+const makeEntryForScore = (overrides: Partial<NegativeKnowledgeEntry> = {}): NegativeKnowledgeEntry => ({
+  id: 'nk_score_test',
+  scenario: 'test',
+  attempt: 'test',
+  outcome: 'test',
+  solution: 'test',
+  tags: [],
+  timestamp: new Date().toISOString(),
+  ...overrides,
+});
 
 describe('resolveWilsonScore', () => {
   it('uses compound key when total_attempts >= 3', () => {
-    const entry = makeEntry({
+    const entry = makeEntryForScore({
       vote_metrics: {
         contexts: {
           'next+prisma': { successes: 8, total_attempts: 10 },
@@ -384,7 +398,7 @@ describe('resolveWilsonScore', () => {
   });
 
   it('falls back to best individual key when compound has < 3 attempts', () => {
-    const entry = makeEntry({
+    const entry = makeEntryForScore({
       vote_metrics: {
         contexts: {
           'next+prisma': { successes: 1, total_attempts: 2 },
@@ -399,7 +413,7 @@ describe('resolveWilsonScore', () => {
   });
 
   it('falls back to _default when no key qualifies', () => {
-    const entry = makeEntry({
+    const entry = makeEntryForScore({
       vote_metrics: {
         contexts: {
           '_default': { successes: 3, total_attempts: 5 },
@@ -412,12 +426,12 @@ describe('resolveWilsonScore', () => {
   });
 
   it('returns 0 for entry with no vote_metrics', () => {
-    const entry = makeEntry();
+    const entry = makeEntryForScore();
     expect(resolveWilsonScore(entry, ['jest'])).toBe(0);
   });
 
   it('returns 0 for entry with empty contexts', () => {
-    const entry = makeEntry({ vote_metrics: { contexts: {} } });
+    const entry = makeEntryForScore({ vote_metrics: { contexts: {} } });
     expect(resolveWilsonScore(entry, ['jest'])).toBe(0);
   });
 });
@@ -1394,14 +1408,15 @@ describe('vote receipt attachment', () => {
     const packetFiles = fs.readdirSync(packetsDir).filter(f => f.endsWith('.json'));
     expect(packetFiles.length).toBeGreaterThan(0);
     const packet = JSON.parse(fs.readFileSync(path.join(packetsDir, packetFiles[0]), 'utf-8'));
-    // If NK entries were injected and task ran, vote_receipts should be present
-    if (packet.vote_receipts) {
-      expect(Array.isArray(packet.vote_receipts)).toBe(true);
-      expect(packet.vote_receipts[0]).toHaveProperty('nk_id');
-      expect(packet.vote_receipts[0]).toHaveProperty('context_keys');
-      expect(packet.vote_receipts[0]).toHaveProperty('succeeded');
-      expect(packet.vote_receipts[0]).toHaveProperty('timestamp');
-    }
+    // NK entry keywords must overlap with active task text to guarantee injection.
+    // The test setup should ensure this (e.g., NK scenario "test failure" + task "fix test failure").
+    expect(packet.vote_receipts).toBeDefined();
+    expect(Array.isArray(packet.vote_receipts)).toBe(true);
+    expect(packet.vote_receipts.length).toBeGreaterThan(0);
+    expect(packet.vote_receipts[0]).toHaveProperty('nk_id');
+    expect(packet.vote_receipts[0]).toHaveProperty('context_keys');
+    expect(packet.vote_receipts[0]).toHaveProperty('succeeded');
+    expect(packet.vote_receipts[0]).toHaveProperty('timestamp');
   });
 });
 ```
