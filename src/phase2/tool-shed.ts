@@ -299,13 +299,23 @@ export class ToolShed {
         case 'bash_execute': {
           const command = params['command'] as string;
 
+          // Block subshell expansion patterns (defense-in-depth)
+          if (/\$\(|`|\n/.test(command)) {
+            return {
+              success: false,
+              output: '',
+              error: 'Command blocked: contains subshell expansion ($(...), backticks) or embedded newlines',
+            };
+          }
+
           const segments = command.split(SHELL_OPERATORS);
           for (const segment of segments) {
             const firstToken = segment.trim().split(/\s+/)[0];
             if (!firstToken) continue;
 
-            // Blocklist check (always applies, immutable)
-            if (BLOCKED_COMMANDS.has(firstToken)) {
+            // Blocklist check (always applies, immutable) — extract basename to catch /bin/rm etc.
+            const basename = firstToken.split(/[/\\]/).pop() ?? firstToken;
+            if (BLOCKED_COMMANDS.has(basename)) {
               return {
                 success: false,
                 output: '',
@@ -351,7 +361,7 @@ export class ToolShed {
               '[ToolShed] bash_execute: bash may not be available on Windows. Consider using PowerShell or WSL.',
             );
           }
-          const output = execSync(command, { cwd, encoding: 'utf-8', timeout: 30000 });
+          const output = execSync(command, { cwd: effectiveCwd, encoding: 'utf-8', timeout: 30000 });
           return { success: true, output };
         }
         case 'test_runner': {

@@ -425,14 +425,13 @@ async function main() {
     packetsDir = path.join(ebaDir, 'memory-packets');
     logsDir = path.join(ebaDir, 'logs');
 
-    // Create .eba/ structure on first use
-    if (!fs.existsSync(ebaDir)) {
-      fs.mkdirSync(ebaDir, { recursive: true });
-      fs.mkdirSync(solutionsDir, { recursive: true });
-      fs.mkdirSync(packetsDir, { recursive: true });
-      fs.mkdirSync(logsDir, { recursive: true });
+    // Create .eba/ structure (idempotent — recursive:true is a no-op if exists)
+    const ebaExisted = fs.existsSync(ebaDir);
+    fs.mkdirSync(solutionsDir, { recursive: true });
+    fs.mkdirSync(packetsDir, { recursive: true });
+    fs.mkdirSync(logsDir, { recursive: true });
+    if (!ebaExisted) {
       console.log(`📁 Creating .eba/ in ${targetProjectDir} for EBA artifacts`);
-
       // Create .gitignore if target project has .git/
       if (fs.existsSync(path.join(targetProjectDir, '.git'))) {
         fs.writeFileSync(path.join(ebaDir, '.gitignore'), [

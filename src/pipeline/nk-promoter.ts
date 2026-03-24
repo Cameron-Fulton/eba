@@ -34,7 +34,6 @@ const CONFIG_FILES = [
 ];
 
 const ABSOLUTE_PATH_PATTERN = /(?:\/home\/|\/Users\/|[A-Z]:\\)/i;
-const FILE_EXTENSIONS = new Set(['ts', 'js', 'tsx', 'jsx', 'py', 'go', 'rs', 'json', 'yml', 'yaml', 'md', 'html', 'css', 'scss', 'vue', 'svelte']);
 const SPECIFIC_FILENAME_PATTERN = /(?:[a-z][a-zA-Z]+|[A-Z][a-z]+[A-Z]\w*)\.(ts|js|tsx|jsx|py|go|rs|json|yml|yaml|md|html|css|scss|vue|svelte)\b/;
 const SOP_TAG_PATTERN = /^(?:refactoring|bug-fix|feature|code-review|dependency-upgrade|deployment|database-migration|documentation|security-audit|performance-optimization|infrastructure-probe)$/;
 

@@ -104,8 +104,8 @@ export class ContextDiscovery {
       try {
         const config = JSON.parse(fs.readFileSync(ebaConfigPath, 'utf-8'));
         ebaConfig = {
-          test_command: config.test_command,
-          project_name: config.project_name,
+          test_command: typeof config.test_command === 'string' ? config.test_command : undefined,
+          project_name: typeof config.project_name === 'string' ? config.project_name : undefined,
           context: Array.isArray(config.context) ? config.context : undefined,
           allowed_commands: Array.isArray(config.allowed_commands) ? config.allowed_commands : undefined,
         };
