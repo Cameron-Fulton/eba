@@ -229,7 +229,7 @@ export function mergePackets(packets: MemoryPacket[]): MemoryPacket {
   const receiptKeys = new Set<string>();
   for (const pkt of packets) {
     for (const receipt of pkt.vote_receipts ?? []) {
-      const key = `${receipt.nk_id}|${receipt.context_keys.sort().join('+')}`;
+      const key = `${receipt.nk_id}|${[...receipt.context_keys].sort().join('+')}`;
       if (!receiptKeys.has(key)) {
         receiptKeys.add(key);
         allReceipts.push(receipt);
