@@ -258,7 +258,7 @@ export function applyVoteReceipts(
     }
 
     const updated = incrementVotes(entry, receipt.context_keys, receipt.succeeded);
-    store.update(entry.id, updated);
+    store.update(entry.id, { vote_metrics: updated.vote_metrics });
     applied++;
   }
 
