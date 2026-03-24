@@ -111,7 +111,7 @@ export class PromptEnhancer implements LLMProvider {
       const globalEntries = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, remainingSlots);
       nkEntries = [...nkEntries, ...globalEntries];
     }
-    this.injectedNkEntries = [...nkEntries];
+    this.injectedNkEntries.push(...nkEntries);
 
     if (nkEntries.length > 0) {
       const sanitize = (s: string) => s
@@ -139,7 +139,12 @@ export class PromptEnhancer implements LLMProvider {
   }
 
   getInjectedNkEntries(): NegativeKnowledgeEntry[] {
-    return [...this.injectedNkEntries];
+    const seen = new Set<string>();
+    return this.injectedNkEntries.filter(e => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
   }
 
   clearInjectedNkEntries(): void {
