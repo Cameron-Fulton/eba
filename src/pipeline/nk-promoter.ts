@@ -165,7 +165,6 @@ export class NKPromoter {
       `date: ${date}`,
       'type: solution',
       'validated: false',
-      'votes: 0',
       '---',
       '',
       `## ${entry.scenario}`,
