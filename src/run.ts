@@ -47,6 +47,7 @@ import { TaskQueue } from './pipeline/task-queue';
 import { MergeAgent } from './pipeline/merge-agent';
 import { TaskIntake } from './pipeline/task-intake';
 import { ContextDiscovery } from './pipeline/context-discovery';
+import { NKPromoter } from './pipeline/nk-promoter';
 
 /** Allowlist: only permit safe characters for shell test commands */
 const SAFE_COMMAND = /^[a-zA-Z0-9 _.\-\/=]+$/;
@@ -454,6 +455,20 @@ async function main() {
     console.log(`📚 Loaded ${projectNkStore.getAll().length} project negative knowledge entries`);
   }
 
+  // Create NK promoter for external projects (when librarian intake exists)
+  let nkPromoter: NKPromoter | undefined;
+  if (isExternalProject) {
+    const intakeDir = process.env.LIBRARIAN_INTAKE_DIR ?? 'D:\\_system\\librarian\\intake';
+    if (fs.existsSync(intakeDir)) {
+      nkPromoter = new NKPromoter({
+        intakeDir,
+        projectName: ebaConfig?.project_name ?? path.basename(targetProjectDir),
+        projectRoot: targetProjectDir,
+      });
+      console.log('📤 NK promotion enabled (librarian intake available)');
+    }
+  }
+
   const taskType = detectTaskType(taskText);
   const selectedSop = selectSOP(taskText, sop);
   const testCommand = ebaTestCommand
@@ -485,6 +500,7 @@ async function main() {
     projectContext: projectContext.content || undefined,
     targetProjectDir: targetProjectDir !== ROOT_DIR ? targetProjectDir : undefined,
     projectNkStore,
+    nkPromoter,
   });
 
   console.log(`📋 Task source: ${taskSource}`);
