@@ -58,23 +58,10 @@ export function buildContextKeys(projectFrameworks: string[], taskTags: string[]
   const tier1Tags = unique.filter(t => TIER_1_FRAMEWORKS.has(t));
   const tier2Tags = taskTags.map(t => t.toLowerCase()).filter(t => TIER_2_INTEGRATIONS.has(t));
 
-  const compoundParts: string[] = [];
+  const compoundTags = [...new Set([...tier1Tags, ...tier2Tags])].sort().slice(0, 4);
 
-  // Max 1 tier1
-  if (tier1Tags.length > 0) {
-    compoundParts.push(tier1Tags[0]);
-  }
-
-  // Add tier2 tags
-  for (const t of tier2Tags) {
-    compoundParts.push(t);
-  }
-
-  // Cap at 4, sort, join
-  const capped = compoundParts.slice(0, 4).sort();
-
-  if (capped.length >= 2) {
-    keys.push(capped.join('+'));
+  if (compoundTags.length >= 2) {
+    keys.push(compoundTags.join('+'));
   }
 
   return keys;
