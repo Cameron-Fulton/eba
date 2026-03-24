@@ -95,6 +95,33 @@ describe('ContextDiscovery', () => {
     expect(ctx.content).not.toContain('## Referenced:');
   });
 
+  it('returns ebaConfig from .eba.json', () => {
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), 'Rules');
+    fs.writeFileSync(path.join(tmpDir, '.eba.json'), JSON.stringify({
+      test_command: 'pytest',
+      project_name: 'my-app',
+      allowed_commands: ['python', 'pytest'],
+    }));
+    const ctx = new ContextDiscovery(tmpDir, '/nonexistent/SYSTEM.md').discover();
+    expect(ctx.ebaConfig).toBeDefined();
+    expect(ctx.ebaConfig!.test_command).toBe('pytest');
+    expect(ctx.ebaConfig!.project_name).toBe('my-app');
+    expect(ctx.ebaConfig!.allowed_commands).toEqual(['python', 'pytest']);
+  });
+
+  it('returns undefined ebaConfig when no .eba.json', () => {
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), 'Rules');
+    const ctx = new ContextDiscovery(tmpDir, '/nonexistent/SYSTEM.md').discover();
+    expect(ctx.ebaConfig).toBeUndefined();
+  });
+
+  it('returns undefined ebaConfig when .eba.json is invalid', () => {
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), 'Rules');
+    fs.writeFileSync(path.join(tmpDir, '.eba.json'), 'not json');
+    const ctx = new ContextDiscovery(tmpDir, '/nonexistent/SYSTEM.md').discover();
+    expect(ctx.ebaConfig).toBeUndefined();
+  });
+
   it('blocks path traversal in .eba.json context', () => {
     fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), 'Rules');
     fs.writeFileSync(path.join(tmpDir, '.eba.json'),

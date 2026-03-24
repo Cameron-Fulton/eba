@@ -72,4 +72,51 @@ describe('PromptEnhancer', () => {
       expect(result).not.toContain('## Project Context');
     });
   });
+
+  describe('project-first NK search', () => {
+    it('uses project NK entries first, fills from global', () => {
+      const projectNk = {
+        searchByKeyword: jest.fn().mockReturnValue([
+          { scenario: 'proj-fail', attempt: 'did X', outcome: 'broke', solution: 'do Y', tags: [] },
+          { scenario: 'proj-fail-2', attempt: 'did A', outcome: 'broke', solution: 'do B', tags: [] },
+        ]),
+      } as unknown as NegativeKnowledgeStore;
+
+      const globalNk = {
+        searchByKeyword: jest.fn().mockReturnValue([
+          { scenario: 'global-fail', attempt: 'did Z', outcome: 'broke', solution: 'do W', tags: [] },
+          { scenario: 'global-fail-2', attempt: 'did C', outcome: 'broke', solution: 'do D', tags: [] },
+          { scenario: 'global-fail-3', attempt: 'did E', outcome: 'broke', solution: 'do F', tags: [] },
+          { scenario: 'global-fail-4', attempt: 'did G', outcome: 'broke', solution: 'do H', tags: [] },
+        ]),
+      } as unknown as NegativeKnowledgeStore;
+
+      const enhancer = makeEnhancer({
+        negativeKnowledge: globalNk,
+        projectNegativeKnowledge: projectNk,
+        maxNkEntries: 5,
+      });
+
+      const result = enhancer.enhance('Fix the authentication login module error');
+
+      expect(result).toContain('proj-fail');
+      expect(result).toContain('proj-fail-2');
+      expect(result).toContain('global-fail');
+      expect(result).toContain('global-fail-2');
+      expect(result).toContain('global-fail-3');
+      expect(result).not.toContain('global-fail-4');
+    });
+
+    it('works with only global NK when no project NK provided', () => {
+      const globalNk = {
+        searchByKeyword: jest.fn().mockReturnValue([
+          { scenario: 'global-only', attempt: 'did X', outcome: 'broke', solution: 'do Y', tags: [] },
+        ]),
+      } as unknown as NegativeKnowledgeStore;
+
+      const enhancer = makeEnhancer({ negativeKnowledge: globalNk });
+      const result = enhancer.enhance('Fix the authentication login module error');
+      expect(result).toContain('global-only');
+    });
+  });
 });

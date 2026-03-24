@@ -24,6 +24,8 @@ export interface PromptEnhancerConfig {
   maxTools?:        number;
   /** Project context from ContextDiscovery, injected at prompt start */
   projectContext?: string;
+  /** Project-specific NK store for project-first search */
+  projectNegativeKnowledge?: NegativeKnowledgeStore;
 }
 
 export class PromptEnhancer implements LLMProvider {
@@ -98,7 +100,16 @@ export class PromptEnhancer implements LLMProvider {
       .filter(w => w.length > 4)
       .slice(0, 10)
       .join(' ');
-    const failures = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
+    // Project-first search: project entries fill first, global fills remaining
+    let failures: Array<{ scenario: string; attempt: string; outcome: string; solution: string }> = [];
+    if (this.config.projectNegativeKnowledge) {
+      failures = this.config.projectNegativeKnowledge.searchByKeyword(keyTerms).slice(0, maxNk);
+    }
+    const remainingSlots = maxNk - failures.length;
+    if (remainingSlots > 0) {
+      const globalFailures = this.config.negativeKnowledge.searchByKeyword(keyTerms).slice(0, remainingSlots);
+      failures = [...failures, ...globalFailures];
+    }
 
     if (failures.length > 0) {
       const sanitize = (s: string) => s

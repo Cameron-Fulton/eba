@@ -25,7 +25,7 @@ dotenv.config({ path: '.env.local' });
 import { ModelRouter } from './providers/model-router';
 import { startBenchmarkScheduler } from './scheduler';
 import { NegativeKnowledgeStore } from './phase1/negative-knowledge';
-import { createDefaultToolShed } from './phase2/tool-shed';
+import { createDefaultToolShed, ToolShedConfig } from './phase2/tool-shed';
 import { SOPEngine, SOPDefinition, createRefactoringSOP } from './phase2/sop';
 import {
   createBugFixSOP,
@@ -187,9 +187,9 @@ async function main() {
   const consortiumVoter = router.getConsortiumVoter();
   const negativeKnowledge = new NegativeKnowledgeStore(SOLUTIONS_DIR);
   negativeKnowledge.loadFromDisk();
-  console.log(`📚 Loaded ${negativeKnowledge.getAll().length} negative knowledge entries`);
+  console.log(`📚 Loaded ${negativeKnowledge.getAll().length} global negative knowledge entries`);
 
-  const toolShed = createDefaultToolShed(ROOT_DIR);
+  const toolShed = createDefaultToolShed({ projectRoot: ROOT_DIR });
 
   const sop = new SOPEngine();
   const autoApproveCritical = process.env.EBA_AUTO_APPROVE_CRITICAL === 'true';
@@ -395,20 +395,63 @@ async function main() {
     }
   }
 
-  // Read .eba.json for test command override
-  const ebaConfigPath = path.join(targetProjectDir, '.eba.json');
-  let ebaTestCommand: string | undefined;
-  if (fs.existsSync(ebaConfigPath)) {
-    try {
-      const ebaConfig = JSON.parse(fs.readFileSync(ebaConfigPath, 'utf-8'));
-      if (ebaConfig.test_command) {
-        if (!SAFE_COMMAND.test(ebaConfig.test_command)) {
-          console.error(`❌ .eba.json test_command contains disallowed characters: "${ebaConfig.test_command}"`);
-          process.exit(1);
-        }
-        ebaTestCommand = ebaConfig.test_command;
+  // Use ebaConfig from context discovery (already parsed .eba.json)
+  const ebaConfig = projectContext.ebaConfig;
+  const ebaTestCommand = ebaConfig?.test_command;
+  if (ebaTestCommand && !SAFE_COMMAND.test(ebaTestCommand)) {
+    console.error(`❌ .eba.json test_command contains disallowed characters: "${ebaTestCommand}"`);
+    console.error('   Only alphanumeric characters, spaces, hyphens, underscores, dots, slashes and = are allowed.');
+    process.exit(1);
+  }
+
+  // Build target-aware tool-shed
+  const toolShedConfig: ToolShedConfig = {
+    projectRoot: targetProjectDir,
+    testCommand: ebaTestCommand ?? envTestCommand,
+    allowedPrefixes: ebaConfig?.allowed_commands,
+  };
+  const targetToolShed = createDefaultToolShed(toolShedConfig);
+
+  // Set up artifact directories for external projects
+  const isExternalProject = path.resolve(targetProjectDir) !== path.resolve(ROOT_DIR);
+  let solutionsDir = SOLUTIONS_DIR;
+  let packetsDir = PACKETS_DIR;
+  let logsDir = LOGS_DIR;
+
+  if (isExternalProject) {
+    const ebaDir = path.join(targetProjectDir, '.eba');
+    solutionsDir = path.join(ebaDir, 'solutions');
+    packetsDir = path.join(ebaDir, 'memory-packets');
+    logsDir = path.join(ebaDir, 'logs');
+
+    // Create .eba/ structure on first use
+    if (!fs.existsSync(ebaDir)) {
+      fs.mkdirSync(ebaDir, { recursive: true });
+      fs.mkdirSync(solutionsDir, { recursive: true });
+      fs.mkdirSync(packetsDir, { recursive: true });
+      fs.mkdirSync(logsDir, { recursive: true });
+      console.log(`📁 Creating .eba/ in ${targetProjectDir} for EBA artifacts`);
+
+      // Create .gitignore if target project has .git/
+      if (fs.existsSync(path.join(targetProjectDir, '.git'))) {
+        fs.writeFileSync(path.join(ebaDir, '.gitignore'), [
+          '# EBA session artifacts',
+          'logs/',
+          'memory-packets/',
+          '# Solutions are committed — curated project-specific knowledge',
+          '',
+        ].join('\n'));
       }
-    } catch { /* invalid JSON */ }
+    }
+  }
+
+  // Set up dual NK stores (project-specific NK for external projects)
+  let projectNkStore: NegativeKnowledgeStore | undefined;
+  if (isExternalProject) {
+    fs.mkdirSync(solutionsDir, { recursive: true });
+    projectNkStore = new NegativeKnowledgeStore(solutionsDir);
+    projectNkStore.loadFromDisk();
+    console.log(`📚 Loaded ${projectNkStore.getAll().length} project negative knowledge entries`);
   }
 
   const taskType = detectTaskType(taskText);
@@ -426,21 +469,22 @@ async function main() {
 
   const pipeline = new EBAPipeline({
     docsDir: DOCS_DIR,
-    logsDir: LOGS_DIR,
-    packetsDir: PACKETS_DIR,
-    solutionsDir: SOLUTIONS_DIR,
+    logsDir,
+    packetsDir,
+    solutionsDir,
     primaryProvider: router.standard,
     routineProvider,
     consortiumVoter,
     sop,
     sopId: selectedSop.id,
-    toolShed,
+    toolShed: targetToolShed,
     threePillar,
     testRunner,
     projectOrchestrator,
     approvalMode: 'dev',
     projectContext: projectContext.content || undefined,
     targetProjectDir: targetProjectDir !== ROOT_DIR ? targetProjectDir : undefined,
+    projectNkStore,
   });
 
   console.log(`📋 Task source: ${taskSource}`);

@@ -18,10 +18,18 @@ const FALLBACK_EXCLUDE = [
   'CHANGELOG', 'LICENSE', 'package-lock',
 ];
 
+export interface EbaConfig {
+  test_command?: string;
+  project_name?: string;
+  context?: string[];
+  allowed_commands?: string[];
+}
+
 export interface ProjectContext {
   content: string;
   sources: string[];
   truncated: boolean;
+  ebaConfig?: EbaConfig;
 }
 
 export class ContextDiscovery {
@@ -90,10 +98,17 @@ export class ContextDiscovery {
     }
 
     // 6. .eba.json context overrides
+    let ebaConfig: EbaConfig | undefined;
     const ebaConfigPath = path.join(this.projectDir, '.eba.json');
     if (fs.existsSync(ebaConfigPath)) {
       try {
         const config = JSON.parse(fs.readFileSync(ebaConfigPath, 'utf-8'));
+        ebaConfig = {
+          test_command: config.test_command,
+          project_name: config.project_name,
+          context: Array.isArray(config.context) ? config.context : undefined,
+          allowed_commands: Array.isArray(config.allowed_commands) ? config.allowed_commands : undefined,
+        };
         if (Array.isArray(config.context)) {
           for (const ref of config.context) {
             const refPath = path.resolve(this.projectDir, ref);
@@ -118,7 +133,7 @@ export class ContextDiscovery {
       truncated = true;
     }
 
-    return { content: assembled, sources, truncated };
+    return { content: assembled, sources, truncated, ebaConfig };
   }
 
   private parseFileReferences(content: string): string[] {

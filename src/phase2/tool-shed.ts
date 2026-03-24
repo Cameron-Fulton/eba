@@ -8,6 +8,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, execSync } from 'child_process';
 
+const BLOCKED_COMMANDS = new Set([
+  'rm', 'rmdir', 'del', 'format', 'shutdown', 'reboot',
+  'mkfs', 'dd', 'killall', 'pkill',
+]);
+
+const SHELL_OPERATORS = /\s*(?:&&|\|\||;|\|)\s*/;
+
 function walkDir(dir: string, extensions?: string[]): string[] {
   const results: string[] = [];
   const exts = extensions ?? ['.ts', '.js', '.json', '.md'];
@@ -82,14 +89,37 @@ function promptApproval(message: string): boolean {
   return normalized === 'y' || normalized === 'yes';
 }
 
+export interface ToolShedConfig {
+  projectRoot: string;
+  allowedPrefixes?: string[];
+  testCommand?: string;
+  approvalHandler?: ExternalPathApprovalHandler;
+}
+
+const DEFAULT_ALLOWED_PREFIXES = ['npm ', 'npx ', 'jest ', 'git ', 'node ', 'ts-node ', 'tsc '];
+
 export class ToolShed {
   private tools: Map<string, ToolSchema> = new Map();
   private projectRoot: string;
+  private allowedPrefixes: string[];
+  private testCommand: string;
   private externalPathApprovalHandler: ExternalPathApprovalHandler;
 
-  constructor(projectRoot?: string, approvalHandler?: ExternalPathApprovalHandler) {
-    this.projectRoot = projectRoot ? path.resolve(projectRoot) : path.resolve(process.cwd());
-    this.externalPathApprovalHandler = approvalHandler ?? (request => promptApproval(request.prompt));
+  constructor(config: ToolShedConfig) {
+    this.projectRoot = path.resolve(config.projectRoot);
+    if (config.allowedPrefixes) {
+      const normalized = config.allowedPrefixes.map(p => p.trim());
+      const withGit = ['git', ...normalized.filter(p => p !== 'git')];
+      this.allowedPrefixes = withGit.map(p => p + ' ');
+    } else {
+      this.allowedPrefixes = DEFAULT_ALLOWED_PREFIXES;
+    }
+    const testCmd = config.testCommand ?? 'npm test';
+    if (!/^[a-zA-Z0-9 _.\-\/=]+$/.test(testCmd)) {
+      throw new Error(`testCommand contains disallowed characters: "${testCmd}"`);
+    }
+    this.testCommand = testCmd;
+    this.externalPathApprovalHandler = config.approvalHandler ?? (request => promptApproval(request.prompt));
   }
 
   private validatePath(filePath: string): string {
@@ -106,8 +136,12 @@ export class ToolShed {
   }
 
   private isWithinProjectRoot(candidatePath: string): boolean {
-    const normalizedRoot = path.resolve(this.projectRoot);
-    const normalizedCandidate = path.resolve(candidatePath);
+    let normalizedRoot = path.resolve(this.projectRoot);
+    let normalizedCandidate = path.resolve(candidatePath);
+    if (process.platform === 'win32') {
+      normalizedRoot = normalizedRoot.toLowerCase();
+      normalizedCandidate = normalizedCandidate.toLowerCase();
+    }
     return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(normalizedRoot + path.sep);
   }
 
@@ -264,19 +298,42 @@ export class ToolShed {
         }
         case 'bash_execute': {
           const command = params['command'] as string;
-          const trimmedCommand = command.trim();
-          const allowedPrefixes = ['npm ', 'npx ', 'jest ', 'git ', 'node ', 'ts-node ', 'tsc '];
-          const isAllowed = allowedPrefixes.some(prefix => trimmedCommand.startsWith(prefix));
 
-          if (!isAllowed) {
-            return {
-              success: false,
-              output: '',
-              error: `Command not allowed. Allowed prefixes: ${allowedPrefixes.join(', ')}`,
-            };
+          const segments = command.split(SHELL_OPERATORS);
+          for (const segment of segments) {
+            const firstToken = segment.trim().split(/\s+/)[0];
+            if (!firstToken) continue;
+
+            // Blocklist check (always applies, immutable)
+            if (BLOCKED_COMMANDS.has(firstToken)) {
+              return {
+                success: false,
+                output: '',
+                error: `Command blocked: '${firstToken}' is in the blocklist. Blocked commands: ${[...BLOCKED_COMMANDS].join(', ')}`,
+              };
+            }
+
+            // Allowlist check — token must match an allowed prefix
+            const segmentAllowed = this.allowedPrefixes.some(prefix =>
+              firstToken === prefix.trim()
+            );
+            if (!segmentAllowed) {
+              return {
+                success: false,
+                output: '',
+                error: `Command not allowed. Allowed prefixes: ${this.allowedPrefixes.join(', ')}`,
+              };
+            }
           }
 
           const effectiveCwd = path.resolve(cwd ?? this.projectRoot);
+          if (!this.isWithinProjectRoot(effectiveCwd)) {
+            return {
+              success: false,
+              output: '',
+              error: `cwd escapes project root: ${cwd}`,
+            };
+          }
           const pathCandidates = this.extractPathCandidates(command);
           for (const candidate of pathCandidates) {
             const resolvedCandidatePath = this.resolveCandidatePath(candidate, effectiveCwd);
@@ -299,13 +356,27 @@ export class ToolShed {
         }
         case 'test_runner': {
           const filter = params['filter'] as string | undefined;
-          const args = ['jest', '--runInBand', '--forceExit'];
-          if (filter) {
-            args.push('--testNamePattern', filter);
+          const isJest = this.testCommand.includes('jest');
+
+          if (isJest) {
+            // Jest-specific: support filter parameter
+            const args = this.testCommand.split(/\s+/);
+            const cmd = args.shift()!;
+            if (filter) {
+              args.push('--testNamePattern', filter);
+            }
+            const out = execFileSync(cmd, args, {
+              cwd: this.projectRoot,
+              encoding: 'utf-8',
+              timeout: 120000,
+            });
+            return { success: true, output: out };
           }
 
-          const out = execFileSync('npx', args, {
-            cwd: cwd ?? process.cwd(),
+          // Custom command: run as-is via shell, ignore filter
+          // Note: command is pre-validated by SAFE_COMMAND regex in run.ts
+          const out = execSync(this.testCommand, {
+            cwd: this.projectRoot,
             encoding: 'utf-8',
             timeout: 120000,
           });
@@ -313,9 +384,12 @@ export class ToolShed {
         }
         case 'grep_search': {
           const pattern = params['pattern'] as string;
-          const baseCwd = cwd ?? process.cwd();
+          const baseCwd = this.projectRoot;
           const requestedPath = (params['path'] as string | undefined) ?? '.';
           const searchRoot = path.isAbsolute(requestedPath) ? requestedPath : path.resolve(baseCwd, requestedPath);
+          if (!this.isWithinProjectRoot(searchRoot)) {
+            return { success: false, output: '', error: `Path escapes project root: ${requestedPath}` };
+          }
           const extensions = (params['extensions'] as string[] | undefined) ?? ['.ts', '.js', '.json', '.md'];
 
           const files = walkDir(searchRoot, extensions);
@@ -350,7 +424,13 @@ export class ToolShed {
         }
         case 'glob_find': {
           const pattern = params['pattern'] as string;
-          const baseCwd = cwd ?? process.cwd();
+          const requestedPath = (params['path'] as string | undefined);
+          const baseCwd = requestedPath
+            ? (path.isAbsolute(requestedPath) ? requestedPath : path.resolve(this.projectRoot, requestedPath))
+            : this.projectRoot;
+          if (!this.isWithinProjectRoot(baseCwd)) {
+            return { success: false, output: '', error: `Path escapes project root: ${requestedPath}` };
+          }
           const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
           const globRegex = new RegExp(`^${escaped}$`);
           const files = walkDir(baseCwd, []);
@@ -376,8 +456,8 @@ export class ToolShed {
 }
 
 /** Default tools that model a typical AI engineering environment */
-export function createDefaultToolShed(projectRoot?: string): ToolShed {
-  const shed = new ToolShed(projectRoot);
+export function createDefaultToolShed(config?: ToolShedConfig): ToolShed {
+  const shed = new ToolShed(config ?? { projectRoot: process.cwd() });
 
   shed.register({
     name: 'file_read',
