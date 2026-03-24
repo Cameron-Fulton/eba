@@ -40,8 +40,9 @@ interface NegativeKnowledgeEntry {
 
 The field is optional for backward compatibility. Entries without `vote_metrics` are treated as `{ contexts: { "_default": { successes: 0, total_attempts: 0 } } }`.
 
-### Context key format
+### Context key invariants
 
+- All context keys must be non-empty strings. `buildContextKeys` filters out zero-length strings before constructing keys.
 - **Individual keys:** One per framework/tool tag, e.g., `"jest"`, `"next"`, `"prisma"`
 - **Compound key:** Alphabetically sorted, `+` joined, e.g., `"next+prisma"`. Always constructed via tiered filtering (see Section 2). Minimum 2 tags required to form a compound key.
 - **Legacy key:** `"_default"` — used for entries promoted before this feature, or when no framework tags are detected.
@@ -58,7 +59,7 @@ Format: `key: successes/total_attempts`, comma-separated.
 
 ### Backward compatibility
 
-The `votes:0` and `unvalidated` tags in promoted entries become vestigial — kept for human readability but no longer the source of truth. The `vote_metrics` field is the canonical store.
+The `vote_metrics` field is the canonical store for vote data. The `votes:0` tag is removed from `generalize()` output — it served as a placeholder and is now replaced by `vote_metrics`. The `unvalidated` tag is kept: it is removed only when a future read-path feature determines the entry has sufficient votes to be considered validated. The `promoted` and `source:` tags remain unchanged.
 
 ---
 
@@ -93,6 +94,7 @@ function buildContextKeys(
 ): string[] {
   const all = [...new Set([...projectFrameworks, ...taskTags])]
     .map(t => t.toLowerCase())
+    .filter(t => t.length > 0)
     .sort();
 
   if (all.length === 0) return ["_default"];
@@ -117,9 +119,13 @@ function buildContextKeys(
 }
 ```
 
+### FRAMEWORK_TAGS source of truth
+
+`FRAMEWORK_TAGS` is extracted from `nk-promoter.ts` into `nk-vote-tracker.ts` as the canonical export. `nk-promoter.ts` imports it from `nk-vote-tracker.ts`. This prevents drift between the two modules.
+
 ### detectFrameworks
 
-New method on `ContextDiscovery` (or standalone utility in `nk-vote-tracker.ts`):
+Standalone utility in `nk-vote-tracker.ts`. **Scope limitation:** Currently only reads `package.json` — non-JS projects (Python, Go, Ruby) will fall back to `"_default"` context keys. Future work may add `pyproject.toml`, `go.mod`, `Gemfile` support. This is acceptable for MVP since EBA's primary targets are TypeScript/Node projects.
 
 ```typescript
 function detectFrameworks(projectDir: string): string[] {
@@ -147,7 +153,11 @@ function detectFrameworks(projectDir: string): string[] {
 1. Add `private injectedNkEntries: NegativeKnowledgeEntry[] = []` field
 2. In `enhance()`, after NK search, capture the full entry references (not just destructured fields)
 3. Expose `getInjectedNkEntries(): NegativeKnowledgeEntry[]`
-4. Expose `clearInjectedNkEntries(): void` — called between attempts
+4. Expose `clearInjectedNkEntries(): void` — called at the top of each attempt in `EBAPipeline.run()`'s retry loop, immediately before `createOrchestratorExecutor()` on line 191. This ensures each attempt starts with a clean slate and prevents duplicate vote receipts when the same NK entry is injected across multiple attempts.
+
+### Deduplication guarantee
+
+`createVoteReceipts()` deduplicates by NK entry ID before producing receipts. Even if `clearInjectedNkEntries()` is somehow missed, the receipt builder ensures one receipt per unique NK entry per pipeline run.
 
 ### Current code fix
 
@@ -185,7 +195,7 @@ Uses z=1.96 (95% confidence interval). Returns the lower bound — conservative 
 
 ### Scope
 
-The Wilson score function and fallback logic are implemented in this PR. Integration into PromptEnhancer's search ranking is a separate follow-up.
+The Wilson score function is implemented and tested in this PR as a pure utility. The fallback chain logic is implemented as a pure function (`resolveWilsonScore(entry, contextKeys)`) but is **not wired** into PromptEnhancer's search ranking — that integration is a separate follow-up. Tests cover the math and fallback selection; no integration tests for retrieval ranking.
 
 ---
 
@@ -238,7 +248,20 @@ In `sweep()` (not `mergePackets()`):
 
 ### mergePackets() stays pure
 
-`mergePackets()` remains a pure, deterministic function: takes packets in, returns one merged packet out. All I/O (NK store load, vote increment, disk save, receipt stripping) lives in the async `sweep()` wrapper.
+`mergePackets()` remains a pure, deterministic function: takes packets in, returns one merged packet out. It **unions** all `vote_receipts` arrays from input packets into the merged output (simple array concatenation, deduplicated by `nk_id + context_keys` composite). This preserves receipts through merge operations. All I/O (NK store load, vote increment, disk save, receipt stripping) lives in the async `sweep()` wrapper.
+
+### sweep() vote processing order
+
+`sweep()` must process vote receipts **before** calling `mergePackets()`. Sequence:
+1. Load pending packets
+2. Collect all `vote_receipts` from pending packets
+3. Load global NK store, apply votes via `applyVoteReceipts()`, save store
+4. Strip `vote_receipts` from each pending packet (set to `undefined`)
+5. Call `mergePackets()` on the stripped packets — merged output has no receipts
+
+### applyVoteReceipts error handling
+
+When a `VoteReceipt.nk_id` does not resolve to an entry in the global NK store (entry was deleted or garbage-collected between receipt creation and processing), `applyVoteReceipts()` logs a warning and skips that receipt. No error thrown.
 
 ### Durability
 
@@ -255,16 +278,17 @@ If the Merge Agent isn't running, receipts persist in the memory packet JSON fil
 - `detectFrameworks(projectDir)` — package.json scanning
 - `wilsonScore(successes, total, z?)` — Wilson Score Lower Bound
 - `incrementVotes(entry, contextKeys, succeeded)` — pure function, returns updated entry
-- `createVoteReceipts(entries, projectDir, succeeded)` — convenience for pipeline
+- `createVoteReceipts(entries: NegativeKnowledgeEntry[], projectDir: string, succeeded: boolean): VoteReceipt[]` — convenience for pipeline. Calls `detectFrameworks(projectDir)`, then for each unique entry (deduplicated by `id`), calls `buildContextKeys()` with the entry's framework tags and produces a `VoteReceipt`. Returns `[]` if `entries` is empty or `projectDir` is invalid.
 - `applyVoteReceipts(nkStore, receipts)` — for merge agent's sweep()
 
 ## Modified Files
 
-- `src/phase1/negative-knowledge.ts` — Add `vote_metrics?: VoteMetrics` to entry interface, update `toMarkdown()`/`parseNKMarkdown()` for Vote Metrics line
-- `src/phase1/memory-packet.ts` — Add `vote_receipts?: VoteReceipt[]` to MemoryPacket interface, update validation
+- `src/phase1/negative-knowledge.ts` — Add `vote_metrics?: VoteMetrics` to entry interface. `toMarkdown()`: emit `**Vote Metrics:** key: s/t, ...` line after Tags. `parseNKMarkdown()`: parse with regex `/\*\*Vote Metrics:\*\* (.+)/` (same pattern as Tags), then split on `, ` and parse each `key: s/t` pair with `/^(.+): (\d+)\/(\d+)$/`. If the line is missing or malformed, `vote_metrics` is `undefined` (backward-compatible)
+- `src/phase1/memory-packet.ts` — Add `vote_receipts?: VoteReceipt[]` to MemoryPacket interface. Validation rule: `if (p.vote_receipts !== undefined) { if (!Array.isArray(p.vote_receipts)) errors.push(...) }` — array-check only, no deep validation of inner VoteReceipt fields (receipts are ephemeral and stripped by sweep)
 - `src/pipeline/prompt-enhancer.ts` — Track injected NK entries, expose getter/clear
 - `src/pipeline/eba-pipeline.ts` — Build vote receipts post-task, attach to memory packet
-- `src/pipeline/nk-promoter.ts` — Initialize `vote_metrics: { contexts: { "_default": { successes: 0, total_attempts: 0 } } }` on promoted entries (replaces vestigial `votes:0` tag as source of truth)
+- `src/pipeline/nk-promoter.ts` — Initialize `vote_metrics: { contexts: { "_default": { successes: 0, total_attempts: 0 } } }` on promoted entries. Remove `votes:0` from generated tags. Import `FRAMEWORK_TAGS` from `nk-vote-tracker.ts` instead of defining locally.
+- `src/pipeline/merge-agent.ts` — `sweep()`: process vote receipts before merge, apply to global NK store, strip from packets. `mergePackets()`: union `vote_receipts` arrays from input packets (preserves receipts through intermediate merges)
 
 ## Key Decisions
 
