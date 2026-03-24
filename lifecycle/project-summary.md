@@ -79,7 +79,7 @@ lifecycle/
 **Development span:** 2026-03-14 to 2026-03-22 (9 days, 20 commits on feature branch)
 
 ### Test Health
-- **283 tests across 30 suites:** All passing
+- **440 tests across 38 suites:** All passing
 - **Typecheck:** Clean (no errors)
 - **CVEs:** 0 vulnerabilities
 
@@ -117,10 +117,12 @@ graph TD
 
     subgraph Pipeline
         PIPE[EBAPipeline]
-        PE[PromptEnhancer - call + callWithTools]
+        PE[PromptEnhancer - call + callWithTools + NK tracking]
         PO[ProjectOrchestrator]
         TQ[TaskQueue - SQLite WAL]
-        MA[MergeAgent - sweep + lockfile]
+        MA[MergeAgent - sweep + lockfile + vote processing]
+        NKV[NKVoteTracker - Wilson Score + receipts]
+        NKP[NKPromoter - project→global promotion]
     end
 
     subgraph Phase1
@@ -179,6 +181,11 @@ graph TD
     AL --> PNK --> NK
     NK --> AI
     MA --> MP
+    MA --> NKV
+    PIPE --> NKV
+    PIPE --> NKP
+    NKP --> NK
+    PE --> NKV
     TQ -.-> MA
 ```
 
@@ -267,4 +274,15 @@ gantt
     GeminiProvider callWithTools       :done, ph1, 2026-03-22, 1d
     Security + AI Index Fallback       :done, ph2, 2026-03-22, 1d
     Audit and Merge to Main            :done, ph3, 2026-03-22, 1d
+
+    section Target-Aware + NK Promotion
+    Target-aware tool-shed             :done, ta1, 2026-03-23, 1d
+    NK promotion to global store       :done, ta2, 2026-03-23, 1d
+    Security hardening v3              :done, ta3, 2026-03-23, 1d
+
+    section NK Vote Incrementing
+    Core vote module + Wilson Score    :done, nk1, 2026-03-24, 1d
+    Schema + markdown serialization    :done, nk2, 2026-03-24, 1d
+    Pipeline + Merge Agent wiring      :done, nk3, 2026-03-24, 1d
+    Harden review fixes                :done, nk4, 2026-03-24, 1d
 ```

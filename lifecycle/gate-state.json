@@ -6,15 +6,15 @@
   },
   "currentTask": null,
   "lastHarden": {
-    "taskId": "target-aware-toolshed-and-nk-promotion",
+    "taskId": "nk-vote-incrementing",
     "result": "PASSED",
-    "timestamp": "2026-03-23T00:00:00.000Z"
+    "timestamp": "2026-03-24T00:00:00.000Z"
   },
   "storyGate": {
     "storyId": "provider-hardening",
     "result": "PASSED",
     "timestamp": "2026-03-22T00:00:00.000Z"
   },
-  "diagramDrift": true,
+  "diagramDrift": false,
   "lastAudit": "2026-03-22"
 }

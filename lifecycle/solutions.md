@@ -52,3 +52,13 @@ When `claimed_at` is stored as ISO 8601 from JavaScript (`new Date().toISOString
 ### Advisory lockfile for non-DB concurrency
 Use `proper-lockfile` with `retries: 0` for non-blocking lock acquisition. If the lock is held, return immediately (another process handles it). Use `stale: 30000` to auto-recover from crashed lock holders.
 *Source: 8e46633 (2026-03-21) — merge agent sweep() lockfile pattern*
+
+### Lock-free vote receipts for multi-agent concurrency
+Workers build `VoteReceipt[]` and attach to memory packets instead of mutating the global NK store directly. The Merge Agent — which already runs under `proper-lockfile` — processes receipts in `sweep()` before calling `mergePackets()`, then strips them from the persisted packet. This ensures workers are stateless and lock-free while votes are never lost (receipts persist in packet JSON until processed).
+*Source: /harden nk-vote-incrementing (2026-03-24) — prevents race conditions in parallel agent execution*
+
+## Ranking
+
+### Wilson Score Lower Bound with tiered context keys
+For ranking entries with low sample counts, use Wilson Score Lower Bound (z=1.96) rather than raw success rate. Scope scores to attribute-combination context keys (e.g., `next+prisma`) built via priority tiers: Tier 1 frameworks (max 1) + Tier 2 integrations from task tags. Never include ambient tools (jest, eslint, typescript) in compound keys — they dilute the signal. Fallback chain: compound key (>=3 attempts) → best individual key (>=3) → `_default` → 0.
+*Source: /harden nk-vote-incrementing (2026-03-24) — prevents blended average trap in cross-context ranking*
