@@ -1,20 +1,20 @@
 {
   "lastCommit": {
-    "sha": "adc7ceb",
+    "sha": "55a7bce",
     "result": "PASSED",
-    "timestamp": "2026-03-22T00:00:00.000Z"
+    "timestamp": "2026-03-23T00:00:00.000Z"
   },
   "currentTask": null,
   "lastHarden": {
-    "taskId": "task-intake",
+    "taskId": "target-aware-toolshed-and-nk-promotion",
     "result": "PASSED",
-    "timestamp": "2026-03-22T00:00:00.000Z"
+    "timestamp": "2026-03-23T00:00:00.000Z"
   },
   "storyGate": {
     "storyId": "provider-hardening",
     "result": "PASSED",
     "timestamp": "2026-03-22T00:00:00.000Z"
   },
-  "diagramDrift": false,
+  "diagramDrift": true,
   "lastAudit": "2026-03-22"
 }
